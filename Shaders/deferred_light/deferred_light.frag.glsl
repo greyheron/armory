@@ -9,9 +9,6 @@
 #ifdef _Irr
 #include "std/shirr.glsl"
 #endif
-#ifdef _VoxelGI
-#include "std/conetrace.glsl"
-#endif
 #ifdef _VoxelAOvar
 #include "std/conetrace.glsl"
 #endif
@@ -26,9 +23,6 @@ uniform sampler2D gbufferD;
 uniform sampler2D gbuffer0;
 uniform sampler2D gbuffer1;
 
-#ifdef _VoxelGI
-uniform sampler3D voxels;
-#endif
 #ifdef _VoxelAOvar
 uniform sampler3D voxels;
 #endif
@@ -177,43 +171,27 @@ void main() {
 	n.xy = n.z >= 0.0 ? g0.xy : octahedronWrap(g0.xy);
 	n = normalize(n);
 
-	vec2 metrough = unpackFloat(g0.b);
+	float roughness = g0.b;
+	float metallic;
+	uint matid;
+	unpackFloatInt16(g0.a, metallic, matid);
+
 	vec4 g1 = textureLod(gbuffer1, texCoord, 0.0); // Basecolor.rgb, spec/occ
 	vec2 occspec = unpackFloat2(g1.a);
-	vec3 albedo = surfaceAlbedo(g1.rgb, metrough.x); // g1.rgb - basecolor
-	vec3 f0 = surfaceF0(g1.rgb, metrough.x);
+	vec3 albedo = surfaceAlbedo(g1.rgb, metallic); // g1.rgb - basecolor
+	vec3 f0 = surfaceF0(g1.rgb, metallic);
 
 	float depth = textureLod(gbufferD, texCoord, 0.0).r * 2.0 - 1.0;
 	vec3 p = getPos(eye, eyeLook, normalize(viewRay), depth, cameraProj);
 	vec3 v = normalize(eye - p);
 	float dotNV = max(dot(n, v), 0.0);
 
-#ifdef _Brdf
-	vec2 envBRDF = textureLod(senvmapBrdf, vec2(metrough.y, 1.0 - dotNV), 0.0).xy;
+#ifdef _MicroShadowing
+	occspec.x = mix(1.0, occspec.x, dotNV); // AO Fresnel
 #endif
 
-#ifdef _VoxelGI
-	#ifdef _VoxelGICam
-	vec3 voxpos = (p - eyeSnap) / voxelgiHalfExtents;
-	#else
-	vec3 voxpos = p / voxelgiHalfExtents;
-	#endif
-
-	#ifdef _VoxelGITemporal
-	vec4 indirectDiffuse = traceDiffuse(voxpos, n, voxels) * voxelBlend + traceDiffuse(voxpos, n, voxelsLast) * (1.0 - voxelBlend);
-	#else
-	vec4 indirectDiffuse = traceDiffuse(voxpos, n, voxels);
-	#endif
-
-	fragColor.rgb = indirectDiffuse.rgb * voxelgiDiff * g1.rgb;
-
-	if (occspec.y > 0.0) {
-		vec3 indirectSpecular = traceSpecular(voxels, voxpos, n, v, metrough.y);
-		indirectSpecular *= f0 * envBRDF.x + envBRDF.y;
-		fragColor.rgb += indirectSpecular * voxelgiSpec * occspec.y;
-	}
-
-	// if (!isInsideCube(voxpos)) fragColor = vec4(1.0); // Show bounds
+#ifdef _Brdf
+	vec2 envBRDF = textureLod(senvmapBrdf, vec2(roughness, 1.0 - dotNV), 0.0).xy;
 #endif
 
 	// Envmap
@@ -228,7 +206,7 @@ void main() {
 
 #ifdef _Rad
 	vec3 reflectionWorld = reflect(-v, n);
-	float lod = getMipFromRoughness(metrough.y, envmapNumMipmaps);
+	float lod = getMipFromRoughness(roughness, envmapNumMipmaps);
 	vec3 prefilteredColor = textureLod(senvmapRadiance, envMapEquirect(reflectionWorld), lod).rgb;
 #endif
 
@@ -245,7 +223,7 @@ void main() {
 	envl.rgb += prefilteredColor * (f0 * envBRDF.x + envBRDF.y) * 1.5 * occspec.y;
 #else
 	#ifdef _EnvCol
-	envl.rgb += backgroundCol * surfaceF0(g1.rgb, metrough.x); // f0
+	envl.rgb += backgroundCol * surfaceF0(g1.rgb, metallic); // f0
 	#endif
 #endif
 
@@ -270,11 +248,7 @@ void main() {
 	
 #endif
 
-#ifdef _VoxelGI
-	fragColor.rgb += envl * voxelgiEnv;
-#else
 	fragColor.rgb = envl;
-#endif
 
 #ifdef _SSAO
 	// #ifdef _RTGI
@@ -311,7 +285,7 @@ void main() {
 	float sdotNL = dot(n, sunDir);
 	float svisibility = 1.0;
 	vec3 sdirect = lambertDiffuseBRDF(albedo, sdotNL) +
-				   specularBRDF(f0, metrough.y, sdotNL, sdotNH, dotNV, sdotVH) * occspec.y;
+				   specularBRDF(f0, roughness, sdotNL, sdotNH, dotNV, sdotVH) * occspec.y;
 
 	#ifdef _ShadowMap
 		#ifdef _CSM
@@ -329,27 +303,29 @@ void main() {
 	#endif
 
 	#ifdef _SSRS
-	float tvis = traceShadowSS(-sunDir, p, gbufferD, invVP, eye);
 	// vec2 coords = getProjectedCoord(hitCoord);
 	// vec2 deltaCoords = abs(vec2(0.5, 0.5) - coords.xy);
 	// float screenEdgeFactor = clamp(1.0 - (deltaCoords.x + deltaCoords.y), 0.0, 1.0);
-	// tvis *= screenEdgeFactor;
-	svisibility *= tvis;
+	svisibility *= traceShadowSS(sunDir, p, gbufferD, invVP, eye);
 	#endif
 
 	#ifdef _LightClouds
 	svisibility *= textureLod(texClouds, vec2(p.xy / 100.0 + time / 80.0), 0.0).r * dot(n, vec3(0,0,1));
 	#endif
 
+	#ifdef _MicroShadowing
+	svisibility *= sdotNL + 2.0 * occspec.x * occspec.x - 1.0;
+	#endif
+
 	fragColor.rgb += sdirect * svisibility * sunCol;
 
 //	#ifdef _Hair // Aniso
 // 	if (g0.a == 2.0) {
-// 		const float shinyParallel = metrough.y;
+// 		const float shinyParallel = roughness;
 // 		const float shinyPerpendicular = 0.1;
 // 		const vec3 v = vec3(0.99146, 0.11664, 0.05832);
 // 		vec3 T = abs(dot(n, v)) > 0.99999 ? cross(n, vec3(0.0, 1.0, 0.0)) : cross(n, v);
-// 		fragColor.rgb = orenNayarDiffuseBRDF(albedo, metrough.y, dotNV, dotNL, dotVH) + wardSpecular(n, h, dotNL, dotNV, dotNH, T, shinyParallel, shinyPerpendicular) * spec;
+// 		fragColor.rgb = orenNayarDiffuseBRDF(albedo, roughness, dotNV, dotNL, dotVH) + wardSpecular(n, h, dotNL, dotNV, dotNH, T, shinyParallel, shinyPerpendicular) * spec;
 // 	}
 //	#endif
 
@@ -368,7 +344,7 @@ void main() {
 #ifdef _SinglePoint
 
 	fragColor.rgb += sampleLight(
-		p, n, v, dotNV, pointPos, pointCol, albedo, metrough.y, occspec.y, f0
+		p, n, v, dotNV, pointPos, pointCol, albedo, roughness, occspec.y, f0
 		#ifdef _ShadowMap
 			, 0, pointBias
 		#endif
@@ -379,6 +355,12 @@ void main() {
 		#ifdef _VoxelShadow
 		, voxels, voxpos
 		#endif
+		#endif
+		#ifdef _MicroShadowing
+		, occspec.x
+		#endif
+		#ifdef _SSRS
+		, gbufferD, invVP, eye
 		#endif
 	);
 	
@@ -414,7 +396,7 @@ void main() {
 			lightsArray[li * 2].xyz, // lp
 			lightsArray[li * 2 + 1].xyz, // lightCol
 			albedo,
-			metrough.y,
+			roughness,
 			occspec.y,
 			f0
 			#ifdef _ShadowMap
@@ -426,7 +408,15 @@ void main() {
 			, lightsArraySpot[li].w // cutoff - exponent
 			, lightsArraySpot[li].xyz // spotDir
 			#endif
+			#ifdef _MicroShadowing
+			, occspec.x
+			#endif
+			#ifdef _SSRS
+			, gbufferD, invVP, eye
+			#endif
 		);
 	}
 #endif // _Clusters
+
+	fragColor.a = 1.0; // Mark as opaque
 }

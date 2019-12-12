@@ -126,7 +126,7 @@ def make_base(con_mesh, parse_opacity):
         vert.add_out('vec2 texCoord')
         vert.add_uniform('float texUnpack', link='_texUnpack')
         if mat_state.material.arm_tilesheet_flag:
-            if mat_state.material.arm_particle_flag and rpdat.arm_particles == 'GPU':
+            if mat_state.material.arm_particle_flag and rpdat.arm_particles == 'On':
                 make_particle.write_tilesheet(vert)
             else:
                 vert.add_uniform('vec2 tilesheetOffset', '_tilesheetOffset')
@@ -245,17 +245,17 @@ def make_deferred(con_mesh, rpasses):
     frag.write('n.xy = n.z >= 0.0 ? n.xy : octahedronWrap(n.xy);')
     
     if '_Emission' in wrd.world_defs or '_SSS' in wrd.world_defs or '_Hair' in wrd.world_defs:
-        frag.write('float matid = 0.0;')
+        frag.write('uint matid = 0;')
         if '_Emission' in wrd.world_defs:
-            frag.write('if (emission > 0) matid = 1.0;')
+            frag.write('if (emission > 0) { basecol *= emission; matid = 1; }')
         if '_SSS' in wrd.world_defs or '_Hair' in wrd.world_defs:
             frag.add_uniform('int materialID')
-            frag.write('if (materialID == 2) matid = 2.0;')
+            frag.write('if (materialID == 2) matid = 2;')
     else:
-        frag.write('const float matid = 0.0;')
+        frag.write('const uint matid = 0;')
 
-    frag.write('fragColor[0] = vec4(n.xy, packFloat(metallic, roughness), matid);')
-    frag.write('fragColor[1] = vec4(basecol.rgb, packFloat2(occlusion, specular));')
+    frag.write('fragColor[0] = vec4(n.xy, roughness, packFloatInt16(metallic, matid));')
+    frag.write('fragColor[1] = vec4(basecol, packFloat2(occlusion, specular));')
 
     if '_gbuffer2' in wrd.world_defs:
         if '_Veloc' in wrd.world_defs:
@@ -266,12 +266,14 @@ def make_deferred(con_mesh, rpasses):
     return con_mesh
 
 def make_raytracer(con_mesh):
-    con_mesh.data['vertex_elements'] = [{'name': 'pos', 'data': 'float3'}, {'name': 'nor', 'data': 'float3'}]
+    con_mesh.data['vertex_elements'] = [{'name': 'pos', 'data': 'float3'}, {'name': 'nor', 'data': 'float3'}, {'name': 'tex', 'data': 'float2'}]
     wrd = bpy.data.worlds['Arm']
     vert = con_mesh.make_vert()
     frag = con_mesh.make_frag()
     vert.add_out('vec3 n')
+    vert.add_out('vec2 uv')
     vert.write('n = nor;')
+    vert.write('uv = tex;')
     vert.write('gl_Position = vec4(pos.xyz, 1.0);')
 
 def make_forward_mobile(con_mesh):
@@ -326,7 +328,7 @@ def make_forward_mobile(con_mesh):
     if con_mesh.is_elem('tang'):
         vert.add_out('mat3 TBN')
         make_attrib.write_norpos(con_mesh, vert, declare=True)
-        vert.write('vec3 tangent = normalize(N * tang);')
+        vert.write('vec3 tangent = normalize(N * tang.xyz);')
         vert.write('vec3 bitangent = normalize(cross(wnormal, tangent));')
         vert.write('TBN = mat3(tangent, bitangent, wnormal);')
     else:
@@ -535,7 +537,7 @@ def make_forward(con_mesh):
             frag.write('n /= (abs(n.x) + abs(n.y) + abs(n.z));')
             frag.write('n.xy = n.z >= 0.0 ? n.xy : octahedronWrap(n.xy);')
             frag.write('fragColor[0] = vec4(direct + indirect, packFloat2(occlusion, specular));')
-            frag.write('fragColor[1] = vec4(n.xy, packFloat(metallic, roughness), 1.0);')
+            frag.write('fragColor[1] = vec4(n.xy, roughness, metallic);')
         else:
             frag.add_out('vec4 fragColor[1]')
             frag.write('fragColor[0] = vec4(direct + indirect, 1.0);')
@@ -545,7 +547,7 @@ def make_forward(con_mesh):
             frag.write('fragColor[0].rgb = tonemapFilmic(fragColor[0].rgb);')
 
     # Particle opacity
-    if mat_state.material.arm_particle_flag and arm.utils.get_rp().arm_particles == 'GPU' and mat_state.material.arm_particle_fade:
+    if mat_state.material.arm_particle_flag and arm.utils.get_rp().arm_particles == 'On' and mat_state.material.arm_particle_fade:
         frag.write('fragColor[0].rgb *= p_fade;')
 
 def make_forward_base(con_mesh, parse_opacity=False, transluc_pass=False):
@@ -597,7 +599,7 @@ def make_forward_base(con_mesh, parse_opacity=False, transluc_pass=False):
     frag.write('vec3 f0 = surfaceF0(basecol, metallic);')
 
     if '_Brdf' in wrd.world_defs:
-        frag.add_uniform('sampler2D senvmapBrdf', link='_envmapBrdf')
+        frag.add_uniform('sampler2D senvmapBrdf', link='$brdf.png')
         frag.write('vec2 envBRDF = texture(senvmapBrdf, vec2(roughness, 1.0 - dotNV)).xy;')
 
     if '_Irr' in wrd.world_defs:
@@ -626,7 +628,7 @@ def make_forward_base(con_mesh, parse_opacity=False, transluc_pass=False):
     frag.add_uniform('float envmapStrength', link='_envmapStrength')
     frag.write('indirect *= envmapStrength;')
 
-    if '_VoxelGI' in wrd.world_defs or '_VoxelAO' in wrd.world_defs:
+    if '_VoxelAOvar' in wrd.world_defs:
         frag.add_include('std/conetrace.glsl')
         frag.add_uniform('sampler3D voxels')
         if '_VoxelGICam' in wrd.world_defs:
@@ -634,16 +636,7 @@ def make_forward_base(con_mesh, parse_opacity=False, transluc_pass=False):
             frag.write('vec3 voxpos = (wposition - eyeSnap) / voxelgiHalfExtents;')
         else:
             frag.write('vec3 voxpos = wposition / voxelgiHalfExtents;')
-        if '_VoxelAO' in wrd.world_defs:
-            frag.write('indirect *= vec3(1.0 - traceAO(voxpos, n, voxels));')
-        else:
-            frag.write('vec4 indirectDiffuse = traceDiffuse(voxpos, n, voxels);')
-            frag.write('indirect = indirect * voxelgiEnv + vec3(indirectDiffuse.rgb * voxelgiDiff * basecol);')
-            frag.write('if (specular > 0.0) {')
-            frag.write('vec3 indirectSpecular = traceSpecular(voxels, voxpos, n, vVec, roughness);')
-            frag.write('indirectSpecular *= f0 * envBRDF.x + envBRDF.y;')
-            frag.write('indirect += indirectSpecular * voxelgiSpec * specular;')
-            frag.write('}')
+        frag.write('indirect *= vec3(1.0 - traceAO(voxpos, n, voxels));')
 
     frag.write('vec3 direct = vec3(0.0);')
     frag.add_uniform('bool receiveShadow')
@@ -719,5 +712,5 @@ def make_forward_base(con_mesh, parse_opacity=False, transluc_pass=False):
     if '_Emission' in wrd.world_defs:
         frag.write('if (emission > 0.0) {')
         frag.write('    direct = vec3(0.0);')
-        frag.write('    indirect += basecol;')
+        frag.write('    indirect += basecol * emission;')
         frag.write('}')

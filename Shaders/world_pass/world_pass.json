@@ -76,14 +76,19 @@
 					"ifdef": ["_EnvClouds"]
 				},
 				{
-					"name": "snoise",
-					"link": "_noise256",
+					"name": "scloudsBase",
+					"link": "$clouds_base.raw",
 					"ifdef": ["_EnvClouds"]
 				},
 				{
-					"name": "eye",
-					"link": "_cameraPosition",
-					"ifdef": ["_XEnvClouds"]
+					"name": "scloudsDetail",
+					"link": "$clouds_detail.raw",
+					"ifdef": ["_EnvClouds"]
+				},
+				{
+					"name": "scloudsMap",
+					"link": "$clouds_map.png",
+					"ifdef": ["_EnvClouds"]
 				},
 				{
 					"name": "screenSize",

@@ -8,7 +8,6 @@ class ArmBakeListItem(bpy.types.PropertyGroup):
     obj: PointerProperty(type=bpy.types.Object, description="The object to bake")
     res_x: IntProperty(name="X", description="Texture resolution", default=1024)
     res_y: IntProperty(name="Y", description="Texture resolution", default=1024)
-    object_name: StringProperty(name="Name", description="", default="") # TODO: deprecated
 
 class ARM_UL_BakeList(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
@@ -251,7 +250,7 @@ class ArmBakeApplyButton(bpy.types.Operator):
             ob = o.obj
             img_name = ob.name + '_baked'
             # Save images
-            bpy.data.images[img_name].pack(as_png=True)
+            bpy.data.images[img_name].pack()
             bpy.data.images[img_name].save()
             for slot in ob.material_slots:
                 mat = slot.material

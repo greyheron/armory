@@ -14,7 +14,7 @@ class OnKeyboardNode(Node, ArmLogicTreeNode):
                  ('Started', 'Started', 'Started'),
                  ('Released', 'Released', 'Released')],
         name='', default='Started')
-    
+
     property1: EnumProperty(
         items = [('a', 'a', 'a'),
                  ('b', 'b', 'b'),
@@ -52,12 +52,12 @@ class OnKeyboardNode(Node, ArmLogicTreeNode):
                  ('7', '7', '7'),
                  ('8', '8', '8'),
                  ('9', '9', '9'),
-                 ('.', '.', '.'),
-                 (',', ',', ','),
+                 ('.', 'period', 'period'),
+                 (',', 'comma', 'comma'),
                  ('space', 'space', 'space'),
                  ('backspace', 'backspace', 'backspace'),
                  ('tab', 'tab', 'tab'),
-                 ('return', 'return', 'return'),
+                 ('enter', 'enter', 'enter'),
                  ('shift', 'shift', 'shift'),
                  ('control', 'control', 'control'),
                  ('alt', 'alt', 'alt'),

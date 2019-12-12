@@ -9,6 +9,8 @@ import arm.node_utils as node_utils
 import arm.log as log
 import arm.make_state as state
 
+callback = None
+
 def build():
     worlds = []
     for scene in bpy.data.scenes:
@@ -21,6 +23,9 @@ def build_node_tree(world):
     wrd = bpy.data.worlds['Arm']
     wrd.world_defs = ''
     rpdat = arm.utils.get_rp()
+    
+    if callback != None:
+        callback()
     
     # Traverse world node tree
     parsed = False
@@ -47,7 +52,7 @@ def build_node_tree(world):
         write_probes.write_color_irradiance(wname, world.arm_envtex_color)
 
     # film_transparent
-    if bpy.context.scene != None and bpy.context.scene.cycles != None and bpy.context.scene.cycles.film_transparent:
+    if bpy.context.scene != None and hasattr(bpy.context.scene.render, 'film_transparent') and bpy.context.scene.render.film_transparent:
         wrd.world_defs += '_EnvTransp'
         wrd.world_defs += '_EnvCol'
 

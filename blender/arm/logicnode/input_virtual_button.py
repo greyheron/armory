@@ -5,7 +5,7 @@ from arm.logicnode.arm_nodes import *
 
 class VirtualButtonNode(Node, ArmLogicTreeNode):
     '''Virtual button node'''
-    bl_idname = 'LNVirtualButtonNode'
+    bl_idname = 'LNMergedVirtualButtonNode'
     bl_label = 'Virtual Button'
     bl_icon = 'CURVE_PATH'
     property0: EnumProperty(
@@ -16,6 +16,7 @@ class VirtualButtonNode(Node, ArmLogicTreeNode):
     property1: StringProperty(name='', default='button')
     
     def init(self, context):
+        self.outputs.new('ArmNodeSocketAction', 'Out')
         self.outputs.new('NodeSocketBool', 'State')
 
     def draw_buttons(self, context, layout):

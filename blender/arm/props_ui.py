@@ -228,7 +228,9 @@ class ARM_PT_MaterialBlendingPropsPanel(bpy.types.Panel):
     bl_parent_id = "ARM_PT_MaterialPropsPanel"
 
     def draw_header(self, context):
-        self.layout.prop(bpy.context.material, 'arm_blending', text="")
+        if context.material == None:
+            return
+        self.layout.prop(context.material, 'arm_blending', text="")
 
     def draw(self, context):
         layout = self.layout
@@ -331,6 +333,7 @@ class ARM_PT_ArmoryExporterPanel(bpy.types.Panel):
         col.prop(wrd, 'arm_minify_js')
         col.prop(wrd, 'arm_optimize_data')
         col.prop(wrd, 'arm_asset_compression')
+        col.prop(wrd, 'arm_single_data_file')
 
 class ARM_PT_ArmoryProjectPanel(bpy.types.Panel):
     bl_label = "Armory Project"
@@ -344,7 +347,7 @@ class ARM_PT_ArmoryProjectPanel(bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
         row = layout.row(align=True)
-        row.operator("arm.kode_studio")
+        row.operator("arm.open_editor")
         row.operator("arm.open_project_folder", icon="FILE_FOLDER")
 
 class ARM_PT_ProjectFlagsPanel(bpy.types.Panel):
@@ -416,8 +419,6 @@ class ARM_PT_ProjectModulesPanel(bpy.types.Panel):
         if wrd.arm_navigation != 'Disabled':
             layout.prop(wrd, 'arm_navigation_engine')
         layout.prop(wrd, 'arm_ui')
-        layout.prop(wrd, 'arm_hscript')
-        layout.prop(wrd, 'arm_formatlib')
         layout.prop_search(wrd, 'arm_khafile', bpy.data, 'texts', text='Khafile')
         layout.prop(wrd, 'arm_project_root')
 
@@ -432,72 +433,6 @@ class ArmVirtualInputPanel(bpy.types.Panel):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
-
-class ARM_PT_NavigationPanel(bpy.types.Panel):
-    bl_label = "Armory Navigation"
-    bl_space_type = "PROPERTIES"
-    bl_region_type = "WINDOW"
-    bl_context = "scene"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-        scene = bpy.context.scene
-        if scene == None:
-            return
-
-        layout.operator("arm.generate_navmesh")
-        layout.operator("arm.remove_navmesh")
-
-class ArmoryGenerateNavmeshButton(bpy.types.Operator):
-    '''Generate navmesh from selected meshes'''
-    bl_idname = 'arm.generate_navmesh'
-    bl_label = 'Generate Navmesh'
-
-    def execute(self, context):
-        obj = context.active_object
-        if obj == None or obj.type != 'MESH':
-            return{'CANCELLED'}
-
-        # Prevent duplicates
-        for t in obj.arm_traitlist:
-            if t.class_name_prop == 'NavMesh':
-                return{'FINISHED'}
-
-        # TODO: build tilecache here
-
-        # Navmesh trait
-        obj.arm_traitlist.add()
-        obj.arm_traitlist[-1].type_prop = 'Bundled Script'
-        obj.arm_traitlist[-1].class_name_prop = 'NavMesh'
-
-        # For visualization
-        # Removed in b28
-        # bpy.ops.mesh.navmesh_make('EXEC_DEFAULT')
-        # obj = context.active_object
-        # obj.hide_render = True
-        # obj.arm_export = False
-
-        return{'FINISHED'}
-
-class ArmoryRemoveNavmeshButton(bpy.types.Operator):
-    '''Remove generated navmesh from selected mesh'''
-    bl_idname = 'arm.remove_navmesh'
-    bl_label = 'Remove Navmesh'
-
-    def execute(self, context):
-        obj = context.active_object
-        if obj == None or obj.type != 'MESH':
-            return{'CANCELLED'}
-
-        # Navmesh trait
-        for i in range(len(obj.arm_traitlist)):
-            if obj.arm_traitlist[i].class_name_prop == 'NavMesh':
-                obj.arm_traitlist.remove(i)
-                break
-
-        return{'FINISHED'}
 
 class ArmoryPlayButton(bpy.types.Operator):
     '''Launch player in new window'''
@@ -621,14 +556,14 @@ class ArmoryOpenProjectFolderButton(bpy.types.Operator):
         if not arm.utils.check_saved(self):
             return {"CANCELLED"}
 
-        webbrowser.open('file://' + arm.utils.get_fp())
+        arm.utils.open_folder()
         return{'FINISHED'}
 
-class ArmoryKodeStudioButton(bpy.types.Operator):
-    '''Launch this project in Kode Studio'''
-    bl_idname = 'arm.kode_studio'
-    bl_label = 'Kode Studio'
-    bl_description = 'Open Project in Kode Studio'
+class ArmoryOpenEditorButton(bpy.types.Operator):
+    '''Launch this project in the IDE'''
+    bl_idname = 'arm.open_editor'
+    bl_label = 'Code Editor'
+    bl_description = 'Open Project in IDE'
 
     def execute(self, context):
         if not arm.utils.check_saved(self):
@@ -637,10 +572,10 @@ class ArmoryKodeStudioButton(bpy.types.Operator):
         arm.utils.check_default_props()
 
         if not os.path.exists(arm.utils.get_fp() + "/khafile.js"):
-            print('Generating Krom project for Kode Studio')
+            print('Generating Krom project for IDE build configuration')
             make.build('krom')
 
-        arm.utils.kode_studio()
+        arm.utils.open_editor()
         return{'FINISHED'}
 
 class CleanMenu(bpy.types.Menu):
@@ -766,7 +701,7 @@ class ARM_PT_RenderPathRendererPanel(bpy.types.Panel):
         layout.prop(rpdat, 'arm_particles')
         layout.prop(rpdat, 'arm_skin')
         row = layout.row()
-        row.enabled = rpdat.arm_skin.startswith('GPU')
+        row.enabled = rpdat.arm_skin == 'On'
         row.prop(rpdat, 'arm_skin_max_bones_auto')
         row = layout.row()
         row.enabled = not rpdat.arm_skin_max_bones_auto
@@ -811,12 +746,19 @@ class ARM_PT_RenderPathShadowsPanel(bpy.types.Panel):
         col.prop(rpdat, 'arm_pcfsize')
 
 class ARM_PT_RenderPathVoxelsPanel(bpy.types.Panel):
-    bl_label = "Voxels"
+    bl_label = "Voxel AO"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "render"
     bl_options = {'DEFAULT_CLOSED'}
     bl_parent_id = "ARM_PT_RenderPathPanel"
+
+    def draw_header(self, context):
+        wrd = bpy.data.worlds['Arm']
+        if len(wrd.arm_rplist) <= wrd.arm_rplist_index:
+            return
+        rpdat = wrd.arm_rplist[wrd.arm_rplist_index]
+        self.layout.prop(rpdat, "rp_voxelao", text="")
 
     def draw(self, context):
         layout = self.layout
@@ -827,37 +769,22 @@ class ARM_PT_RenderPathVoxelsPanel(bpy.types.Panel):
             return
         rpdat = wrd.arm_rplist[wrd.arm_rplist_index]
 
-        layout.prop(rpdat, 'rp_gi')
-        col = layout.column()
-        col.enabled = rpdat.rp_gi != 'Off'
-        col2 = col.column()
-        col2.enabled = rpdat.rp_gi == 'Voxel GI'
-        # col2.prop(rpdat, 'arm_voxelgi_bounces')
-        col2.prop(rpdat, 'rp_voxelgi_relight')
-        col3 = col.column()
-        col3.enabled = rpdat.rp_gi == 'Voxel AO'
-        col3.prop(rpdat, 'arm_voxelgi_shadows')
-        col.prop(rpdat, 'arm_voxelgi_cones')
-        col.prop(rpdat, 'rp_voxelgi_resolution')
-        col.prop(rpdat, 'rp_voxelgi_resolution_z')
-        col.prop(rpdat, 'arm_voxelgi_dimensions')
-        col.prop(rpdat, 'arm_voxelgi_revoxelize')
-        col2 = col.column()
+        layout.enabled = rpdat.rp_voxelao
+        layout.prop(rpdat, 'arm_voxelgi_shadows')
+        layout.prop(rpdat, 'arm_voxelgi_cones')
+        layout.prop(rpdat, 'rp_voxelgi_resolution')
+        layout.prop(rpdat, 'rp_voxelgi_resolution_z')
+        layout.prop(rpdat, 'arm_voxelgi_dimensions')
+        layout.prop(rpdat, 'arm_voxelgi_revoxelize')
+        col2 = layout.column()
         col2.enabled = rpdat.arm_voxelgi_revoxelize
         col2.prop(rpdat, 'arm_voxelgi_camera')
         col2.prop(rpdat, 'arm_voxelgi_temporal')
-        col.label(text="Light")
-        col2 = col.column()
-        col2.enabled = rpdat.rp_gi == 'Voxel GI'
-        col2.prop(rpdat, 'arm_voxelgi_diff')
-        col2.prop(rpdat, 'arm_voxelgi_spec')
-        col.prop(rpdat, 'arm_voxelgi_occ')
-        col.prop(rpdat, 'arm_voxelgi_env')
-        col.label(text="Ray")
-        col.prop(rpdat, 'arm_voxelgi_step')
-        col.prop(rpdat, 'arm_voxelgi_range')
-        col.prop(rpdat, 'arm_voxelgi_offset')
-        col.prop(rpdat, 'arm_voxelgi_aperture')
+        layout.prop(rpdat, 'arm_voxelgi_occ')
+        layout.prop(rpdat, 'arm_voxelgi_step')
+        layout.prop(rpdat, 'arm_voxelgi_range')
+        layout.prop(rpdat, 'arm_voxelgi_offset')
+        layout.prop(rpdat, 'arm_voxelgi_aperture')
 
 class ARM_PT_RenderPathWorldPanel(bpy.types.Panel):
     bl_label = "World"
@@ -887,26 +814,23 @@ class ARM_PT_RenderPathWorldPanel(bpy.types.Panel):
         layout.prop(rpdat, 'arm_clouds')
         col = layout.column()
         col.enabled = rpdat.arm_clouds
-        col.prop(rpdat, 'arm_clouds_density')
-        col.prop(rpdat, 'arm_clouds_size')
         col.prop(rpdat, 'arm_clouds_lower')
         col.prop(rpdat, 'arm_clouds_upper')
         col.prop(rpdat, 'arm_clouds_precipitation')
-        col.prop(rpdat, 'arm_clouds_eccentricity')
         col.prop(rpdat, 'arm_clouds_secondary')
         col.prop(rpdat, 'arm_clouds_wind')
-        layout.prop(rpdat, "rp_ocean")
+        col.prop(rpdat, 'arm_clouds_steps')
+        layout.prop(rpdat, "rp_water")
         col = layout.column()
-        col.enabled = rpdat.rp_ocean
-        col.prop(rpdat, 'arm_ocean_level')
-        col.prop(rpdat, 'arm_ocean_fade')
-        col.prop(rpdat, 'arm_ocean_amplitude')
-        col.prop(rpdat, 'arm_ocean_height')
-        col.prop(rpdat, 'arm_ocean_choppy')
-        col.prop(rpdat, 'arm_ocean_speed')
-        col.prop(rpdat, 'arm_ocean_freq')
-        col.prop(rpdat, 'arm_ocean_base_color')
-        col.prop(rpdat, 'arm_ocean_water_color')
+        col.enabled = rpdat.rp_water
+        col.prop(rpdat, 'arm_water_level')
+        col.prop(rpdat, 'arm_water_density')
+        col.prop(rpdat, 'arm_water_displace')
+        col.prop(rpdat, 'arm_water_speed')
+        col.prop(rpdat, 'arm_water_freq')
+        col.prop(rpdat, 'arm_water_refract')
+        col.prop(rpdat, 'arm_water_reflect')
+        col.prop(rpdat, 'arm_water_color')
 
 class ARM_PT_RenderPathPostProcessPanel(bpy.types.Panel):
     bl_label = "Post Process"
@@ -966,6 +890,7 @@ class ARM_PT_RenderPathPostProcessPanel(bpy.types.Panel):
         col = layout.column()
         col.enabled = rpdat.arm_ssrs
         col.prop(rpdat, 'arm_ssrs_ray_step')
+        layout.prop(rpdat, 'arm_micro_shadowing')
         layout.separator()
         layout.prop(rpdat, "rp_bloom")
         col = layout.column()
@@ -985,6 +910,14 @@ class ARM_PT_RenderPathPostProcessPanel(bpy.types.Panel):
         col.prop(rpdat, 'arm_volumetric_light_air_color')
         col.prop(rpdat, 'arm_volumetric_light_air_turbidity')
         col.prop(rpdat, 'arm_volumetric_light_steps')
+        layout.separator()
+        layout.prop(rpdat, "rp_chromatic_aberration")
+        col = layout.column()
+        col.enabled = rpdat.rp_chromatic_aberration
+        col.prop(rpdat, 'arm_chromatic_aberration_type')
+        col.prop(rpdat, 'arm_chromatic_aberration_strength')
+        if rpdat.arm_chromatic_aberration_type == "Spectral":
+            col.prop(rpdat, 'arm_chromatic_aberration_samples')
 
 class ARM_PT_RenderPathCompositorPanel(bpy.types.Panel):
     bl_label = "Compositor"
@@ -1041,7 +974,16 @@ class ARM_PT_RenderPathCompositorPanel(bpy.types.Panel):
         col = layout.column()
         col.enabled = rpdat.rp_autoexposure
         col.prop(rpdat, 'arm_autoexposure_strength', text='Strength')
+        col.prop(rpdat, 'arm_autoexposure_speed', text='Speed')
         layout.prop(rpdat, 'arm_lens_texture')
+        if rpdat.arm_lens_texture != "":
+            layout.prop(rpdat, 'arm_lens_texture_masking')
+            if rpdat.arm_lens_texture_masking:
+                layout.prop(rpdat, 'arm_lens_texture_masking_centerMinClip')
+                layout.prop(rpdat, 'arm_lens_texture_masking_centerMaxClip')
+                layout.prop(rpdat, 'arm_lens_texture_masking_luminanceMin')
+                layout.prop(rpdat, 'arm_lens_texture_masking_luminanceMax')
+                layout.prop(rpdat, 'arm_lens_texture_masking_brightnessExp')
         layout.prop(rpdat, 'arm_lut_texture')
 
 class ARM_PT_BakePanel(bpy.types.Panel):
@@ -1212,7 +1154,6 @@ class ArmGenTerrainButton(bpy.types.Operator):
         links.new(nodes['Material Output'].inputs[2], node.outputs[0])
         node = nodes.new('ShaderNodeTexImage')
         node.location = (-600, 100)
-        node.color_space = 'NONE'
         node.interpolation = 'Closest'
         node.extension = 'EXTEND'
         node.arm_material_param = True
@@ -1495,14 +1436,11 @@ def register():
     bpy.utils.register_class(ArmoryStopButton)
     bpy.utils.register_class(ArmoryBuildProjectButton)
     bpy.utils.register_class(ArmoryOpenProjectFolderButton)
-    bpy.utils.register_class(ArmoryKodeStudioButton)
+    bpy.utils.register_class(ArmoryOpenEditorButton)
     bpy.utils.register_class(CleanMenu)
     bpy.utils.register_class(CleanButtonMenu)
     bpy.utils.register_class(ArmoryCleanProjectButton)
     bpy.utils.register_class(ArmoryPublishProjectButton)
-    bpy.utils.register_class(ArmoryGenerateNavmeshButton)
-    bpy.utils.register_class(ArmoryRemoveNavmeshButton)
-    bpy.utils.register_class(ARM_PT_NavigationPanel)
     bpy.utils.register_class(ArmGenLodButton)
     bpy.utils.register_class(ARM_PT_LodPanel)
     bpy.utils.register_class(ArmGenTerrainButton)
@@ -1548,14 +1486,11 @@ def unregister():
     bpy.utils.unregister_class(ArmoryStopButton)
     bpy.utils.unregister_class(ArmoryBuildProjectButton)
     bpy.utils.unregister_class(ArmoryOpenProjectFolderButton)
-    bpy.utils.unregister_class(ArmoryKodeStudioButton)
+    bpy.utils.unregister_class(ArmoryOpenEditorButton)
     bpy.utils.unregister_class(CleanMenu)
     bpy.utils.unregister_class(CleanButtonMenu)
     bpy.utils.unregister_class(ArmoryCleanProjectButton)
     bpy.utils.unregister_class(ArmoryPublishProjectButton)
-    bpy.utils.unregister_class(ArmoryGenerateNavmeshButton)
-    bpy.utils.unregister_class(ArmoryRemoveNavmeshButton)
-    bpy.utils.unregister_class(ARM_PT_NavigationPanel)
     bpy.utils.unregister_class(ArmGenLodButton)
     bpy.utils.unregister_class(ARM_PT_LodPanel)
     bpy.utils.unregister_class(ArmGenTerrainButton)

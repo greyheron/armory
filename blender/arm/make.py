@@ -101,11 +101,23 @@ def export_data(fp, sdk_path):
     ui_found = False
     ArmoryExporter.compress_enabled = state.is_publish and wrd.arm_asset_compression
     ArmoryExporter.optimize_enabled = state.is_publish and wrd.arm_optimize_data
+    if not os.path.exists(build_dir + '/compiled/Assets'):
+        os.makedirs(build_dir + '/compiled/Assets')
+    # have a "zoo" collection in the current scene
+    export_coll = bpy.data.collections.new("export_coll") 
+    bpy.context.scene.collection.children.link(export_coll)
+    for scene in bpy.data.scenes:
+        if scene == bpy.context.scene: continue
+        for o in scene.collection.all_objects:
+            if o.type == "MESH" or o.type == "EMPTY":  export_coll.objects.link(o)
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    bpy.data.collections.remove(export_coll) # destroy "zoo" collection
+    
     for scene in bpy.data.scenes:
         if scene.arm_export:
-            ext = '.zip' if ArmoryExporter.compress_enabled else '.arm'
+            ext = '.lz4' if ArmoryExporter.compress_enabled else '.arm'
             asset_path = build_dir + '/compiled/Assets/' + arm.utils.safestr(scene.name) + ext
-            exporter.execute(bpy.context, asset_path, scene=scene)
+            exporter.execute(bpy.context, asset_path, scene=scene, depsgraph=depsgraph)
             if ArmoryExporter.export_physics:
                 physics_found = True
             if ArmoryExporter.export_navigation:
@@ -135,10 +147,6 @@ def export_data(fp, sdk_path):
         modules.append('navigation')
     if export_ui:
         modules.append('ui')
-    if wrd.arm_hscript == 'Enabled':
-        modules.append('hscript')
-    if wrd.arm_formatlib == 'Enabled':
-        modules.append('format')
     print('Exported modules: ' + str(modules))
 
     defs = arm.utils.def_strings_to_array(wrd.world_defs)
@@ -167,8 +175,6 @@ def export_data(fp, sdk_path):
             assets.shader_passes_assets[ref] = []
             if ref.startswith('compositor_pass'):
                 compile_shader_pass(res, raw_shaders_path, ref, defs + cdefs, make_variants=has_config)
-            # elif ref.startswith('grease_pencil'):
-                # compile_shader_pass(res, raw_shaders_path, ref, [], make_variants=has_config)
             else:
                 compile_shader_pass(res, raw_shaders_path, ref, defs, make_variants=has_config)
         arm.utils.write_arm(shaders_path + '/shader_datas.arm', res)
@@ -261,9 +267,7 @@ def compile(assets_only=False):
         cmd.append('--raytrace')
         cmd.append('dxr')
         dxc_path = fp + '/HlslShaders/dxc.exe'
-        subprocess.Popen([dxc_path, '-Zpr', '-Fo', fp + '/Bundled/pt_raygeneration.o', '-T', 'lib_6_1', fp + '/HlslShaders/pt_raygeneration.hlsl']).wait()
-        subprocess.Popen([dxc_path, '-Zpr', '-Fo', fp + '/Bundled/pt_closesthit.o', '-T', 'lib_6_1', fp + '/HlslShaders/pt_closesthit.hlsl']).wait()
-        subprocess.Popen([dxc_path, '-Zpr', '-Fo', fp + '/Bundled/pt_miss.o', '-T', 'lib_6_1', fp + '/HlslShaders/pt_miss.hlsl']).wait()
+        subprocess.Popen([dxc_path, '-Zpr', '-Fo', fp + '/Bundled/raytrace.cso', '-T', 'lib_6_3', fp + '/HlslShaders/raytrace.hlsl']).wait()
 
     if arm.utils.get_khamake_threads() > 1:
         cmd.append('--parallelAssetConversion')
@@ -514,17 +518,14 @@ def build_success():
         elif wrd.arm_runtime == 'Krom':
             if wrd.arm_live_patch:
                 open(arm.utils.get_fp_build() + '/debug/krom/krom.patch', 'w').close()
-            if arm.utils.get_os() == 'win':
-                bin_ext = '' if state.export_gapi == 'direct3d11' else '_' + state.export_gapi
-            else:
-                bin_ext = '' if state.export_gapi == 'opengl' else '_' + state.export_gapi
-            krom_location, krom_path = arm.utils.krom_paths(bin_ext=bin_ext)
+            krom_location, krom_path = arm.utils.krom_paths()
             os.chdir(krom_location)
             cmd = [krom_path, arm.utils.get_fp_build() + '/debug/krom', arm.utils.get_fp_build() + '/debug/krom-resources']
             if arm.utils.get_os() == 'win':
                 cmd.append('--consolepid')
                 cmd.append(str(os.getpid()))
-            cmd.append('--sound')
+            if wrd.arm_audio == 'Disabled':
+                cmd.append('--nosound')
             state.proc_play = run_proc(cmd, play_done)
 
     elif state.is_publish:
@@ -568,19 +569,6 @@ def build_success():
                         shutil.move(f, files_path + '/Krom.app/Contents/MacOS')
                 krom_exe = arm.utils.safestr(wrd.arm_project_name) + '.app'
                 os.rename(files_path + '/Krom.app', files_path + '/' + krom_exe)
-            # Serialize krom.js into krom.bin
-            if wrd.arm_minify_js:
-                cwd = os.getcwd()
-                fp = files_path
-                if state.target == 'krom-macos':
-                    fp += '/' + krom_exe + '/Contents/MacOS'
-                    krom_exe = './Krom'
-                os.chdir(fp)
-                args = [krom_exe, '.', '.', '--writebin']
-                proc = subprocess.Popen(args)
-                proc.wait()
-                os.chdir(cwd)
-                os.remove(fp + '/krom.js')
 
             # Rename
             ext = state.target.split('-')[-1] # krom-windows
@@ -594,7 +582,7 @@ def build_success():
             print('Exported XCode project to ' + files_path + '-build')
         elif target_name.startswith('windows'):
             print('Exported Visual Studio 2017 project to ' + files_path + '-build')
-        elif target_name.startswith('android-native'):
+        elif target_name.startswith('android'):
             print('Exported Android Studio project to ' + files_path + '-build/' + arm.utils.safestr(wrd.arm_project_name))
         elif target_name.startswith('krom'):
             print('Exported Krom package to ' + files_path)
@@ -620,11 +608,9 @@ def clean():
     if os.path.isdir(nodes_path):
         shutil.rmtree(nodes_path, onerror=remove_readonly)
 
-    # Remove khafile/korefile/Main.hx
+    # Remove khafile/Main.hx
     if os.path.isfile('khafile.js'):
         os.remove('khafile.js')
-    if os.path.isfile('korefile.js'):
-        os.remove('korefile.js')
     if os.path.isfile('Sources/Main.hx'):
         os.remove('Sources/Main.hx')
 

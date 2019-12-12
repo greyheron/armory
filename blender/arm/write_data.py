@@ -79,7 +79,7 @@ project.addSources('Sources');
             for lib in libs:
                 if os.path.isdir('Libraries/' + lib):
                     f.write('project.addLibrary("{0}");\n'.format(lib.replace('//', '/')))
-        
+
         # Subprojects, merge this with libraries
         if os.path.exists('Subprojects'):
             libs = os.listdir('Subprojects')
@@ -88,8 +88,9 @@ project.addSources('Sources');
                     f.write('await project.addProject("Subprojects/{0}");\n'.format(lib))
 
         if wrd.arm_audio == 'Disabled':
-            assets.add_khafile_def('arm_no_audio')
             assets.add_khafile_def('kha_no_ogg')
+        else:
+            assets.add_khafile_def('arm_audio')
 
         if export_physics:
             assets.add_khafile_def('arm_physics')
@@ -97,11 +98,17 @@ project.addSources('Sources');
                 assets.add_khafile_def('arm_bullet')
                 if not os.path.exists('Libraries/haxebullet'):
                     f.write(add_armory_library(sdk_path + '/lib/', 'haxebullet', rel_path=rel_path))
-                if state.target.startswith('krom') or state.target == 'html5' or state.target == 'node':
+                if state.target.startswith('krom'):
+                    ammojs_path = sdk_path + '/lib/haxebullet/ammo/ammo.wasm.js'
+                    ammojs_path = ammojs_path.replace('\\', '/').replace('//', '/')
+                    f.write(add_assets(ammojs_path, rel_path=rel_path))
+                    ammojs_wasm_path = sdk_path + '/lib/haxebullet/ammo/ammo.wasm.wasm'
+                    ammojs_wasm_path = ammojs_wasm_path.replace('\\', '/').replace('//', '/')
+                    f.write(add_assets(ammojs_wasm_path, rel_path=rel_path))
+                elif state.target == 'html5' or state.target == 'node':
                     ammojs_path = sdk_path + '/lib/haxebullet/ammo/ammo.js'
                     ammojs_path = ammojs_path.replace('\\', '/').replace('//', '/')
                     f.write(add_assets(ammojs_path, rel_path=rel_path))
-                    # haxe.macro.Compiler.includeFile(ammojs_path)
             elif wrd.arm_physics_engine == 'Oimo':
                 assets.add_khafile_def('arm_oimo')
                 if not os.path.exists('Libraries/oimo'):
@@ -153,8 +160,7 @@ project.addSources('Sources');
             f.write("project.addParameter('" + import_traits[i] + "');\n")
             f.write("""project.addParameter("--macro keep('""" + import_traits[i] + """')");\n""")
 
-        jstarget = state.target == 'krom' or state.target == 'html5'
-        noembed = wrd.arm_cache_build and not is_publish and jstarget
+        noembed = wrd.arm_cache_build and not is_publish and state.target == 'krom'
         if noembed:
             # Load shaders manually
             assets.add_khafile_def('arm_noembed')
@@ -189,7 +195,7 @@ project.addSources('Sources');
             dest += ', destination: "data/{name}"'
         f.write('project.addAssets("' + assets_path + '", { notinlist: true ' + dest + '});\n')
         f.write('project.addAssets("' + assets_path_sh + '", { notinlist: true ' + dest + '});\n')
-        
+
         shader_data_references = sorted(list(set(assets.shader_datas)))
         for ref in shader_data_references:
             ref = ref.replace('\\', '/').replace('//', '/')
@@ -229,15 +235,6 @@ project.addSources('Sources');
             f.write(add_assets(p.replace('\\', '/'), use_data_dir=use_data_dir, rel_path=rel_path))
             assets.add_khafile_def('arm_ui')
 
-        if wrd.arm_hscript == 'Enabled':
-            if not os.path.exists('Libraries/hscript'):
-                f.write(add_armory_library(sdk_path, 'lib/hscript', rel_path=rel_path))
-            assets.add_khafile_def('arm_hscript')
-
-        if wrd.arm_formatlib == 'Enabled':
-            if not os.path.exists('Libraries/iron_format'):
-                f.write(add_armory_library(sdk_path, 'lib/iron_format', rel_path=rel_path))
-        
         if wrd.arm_minimize == False:
             assets.add_khafile_def('arm_json')
 
@@ -251,15 +248,9 @@ project.addSources('Sources');
             assets.add_khafile_def('arm_stream')
 
         rpdat = arm.utils.get_rp()
-        if rpdat.arm_skin == 'CPU':
-            assets.add_khafile_def('arm_skin_cpu')
-        elif rpdat.arm_skin == 'GPU (Matrix)':
-            assets.add_khafile_def('arm_skin_mat')
         if rpdat.arm_skin != 'Off':
             assets.add_khafile_def('arm_skin')
 
-        if rpdat.arm_particles == 'GPU':
-            assets.add_khafile_def('arm_particles_gpu')
         if rpdat.arm_particles != 'Off':
             assets.add_khafile_def('arm_particles')
 
@@ -284,14 +275,17 @@ project.addSources('Sources');
         for d in assets.khafile_defs:
             f.write("project.addDefine('" + d + "');\n")
 
+        for p in assets.khafile_params:
+            f.write("project.addParameter('" + p + "');\n")
+
         if wrd.arm_khafile != None:
             f.write(wrd.arm_khafile.as_string())
 
-        if state.target.startswith('android-native'):
+        if state.target.startswith('android'):
             bundle = 'org.armory3d.' + wrd.arm_project_package if wrd.arm_project_bundle == '' else wrd.arm_project_bundle
-            f.write("project.targetOptions.android_native.package = '{0}';\n".format(arm.utils.safestr(bundle)))
+            f.write("project.targetOptions.android.package = '{0}';\n".format(arm.utils.safestr(bundle)))
             if wrd.arm_winorient != 'Multi':
-                f.write("project.targetOptions.android_native.screenOrientation = '{0}';\n".format(wrd.arm_winorient.lower()))
+                f.write("project.targetOptions.android.screenOrientation = '{0}';\n".format(wrd.arm_winorient.lower()))
         elif state.target.startswith('ios'):
             bundle = 'org.armory3d.' + wrd.arm_project_package if wrd.arm_project_bundle == '' else wrd.arm_project_bundle
             f.write("project.targetOptions.ios.bundle = '{0}';\n".format(arm.utils.safestr(bundle)))
@@ -332,7 +326,7 @@ def write_config(resx, resy):
     output['rp_ssr'] = rpdat.rp_ssr != 'Off'
     output['rp_bloom'] = rpdat.rp_bloom != 'Off'
     output['rp_motionblur'] = rpdat.rp_motionblur != 'Off'
-    output['rp_gi'] = rpdat.rp_gi != 'Off'
+    output['rp_gi'] = rpdat.rp_voxelao
     output['rp_dynres'] = rpdat.rp_dynres
     with open(p + '/config.arm', 'w') as f:
         f.write(json.dumps(output, sort_keys=True, indent=4))
@@ -340,7 +334,7 @@ def write_config(resx, resy):
 def write_mainhx(scene_name, resx, resy, is_play, is_publish):
     wrd = bpy.data.worlds['Arm']
     rpdat = arm.utils.get_rp()
-    scene_ext = '.zip' if (wrd.arm_asset_compression and is_publish) else ''
+    scene_ext = '.lz4' if (wrd.arm_asset_compression and is_publish) else ''
     if scene_ext == '' and not wrd.arm_minimize:
         scene_ext = '.json'
     winmode = get_winmode(wrd.arm_winmode)
@@ -359,7 +353,7 @@ class Main {
     public static inline var projectName = '""" + arm.utils.safestr(wrd.arm_project_name) + """';
     public static inline var projectPackage = '""" + arm.utils.safestr(wrd.arm_project_package) + """';""")
 
-        if rpdat.rp_gi == 'Voxel GI' or rpdat.rp_gi == 'Voxel AO':
+        if rpdat.rp_voxelao:
             f.write("""
     public static inline var voxelgiVoxelSize = """ + str(rpdat.arm_voxelgi_dimensions) + " / " + str(rpdat.rp_voxelgi_resolution) + """;
     public static inline var voxelgiHalfExtents = """ + str(round(rpdat.arm_voxelgi_dimensions / 2.0)) + """;""")
@@ -466,26 +460,23 @@ const int shadowmapCascades = """ + str(rpdat.rp_shadowmap_cascades) + """;
 """)
         if rpdat.arm_clouds:
             f.write(
-"""const float cloudsDensity = """ + str(round(rpdat.arm_clouds_density * 100) / 100) + """;
-const float cloudsSize = """ + str(round(rpdat.arm_clouds_size * 100) / 100) + """;
-const float cloudsLower = """ + str(round(rpdat.arm_clouds_lower * 1000)) + """;
-const float cloudsUpper = """ + str(round(rpdat.arm_clouds_upper * 1000)) + """;
-const vec2 cloudsWind = vec2(""" + str(round(rpdat.arm_clouds_wind[0] * 1000) / 1000) + """, """ + str(round(rpdat.arm_clouds_wind[1] * 1000) / 1000) + """);
-const float cloudsSecondary = """ + str(round(rpdat.arm_clouds_secondary * 100) / 100) + """;
+"""const float cloudsLower = """ + str(round(rpdat.arm_clouds_lower * 100) / 100) + """;
+const float cloudsUpper = """ + str(round(rpdat.arm_clouds_upper * 100) / 100) + """;
+const vec2 cloudsWind = vec2(""" + str(round(rpdat.arm_clouds_wind[0] * 100) / 100) + """, """ + str(round(rpdat.arm_clouds_wind[1] * 100) / 100) + """);
 const float cloudsPrecipitation = """ + str(round(rpdat.arm_clouds_precipitation * 100) / 100) + """;
-const float cloudsEccentricity = """ + str(round(rpdat.arm_clouds_eccentricity * 100) / 100) + """;
+const float cloudsSecondary = """ + str(round(rpdat.arm_clouds_secondary * 100) / 100) + """;
+const int cloudsSteps = """ + str(rpdat.arm_clouds_steps) + """;
 """)
-        if rpdat.rp_ocean:
+        if rpdat.rp_water:
             f.write(
-"""const float seaLevel = """ + str(round(rpdat.arm_ocean_level * 100) / 100) + """;
-const float seaMaxAmplitude = """ + str(round(rpdat.arm_ocean_amplitude * 100) / 100) + """;
-const float seaHeight = """ + str(round(rpdat.arm_ocean_height * 100) / 100) + """;
-const float seaChoppy = """ + str(round(rpdat.arm_ocean_choppy * 100) / 100) + """;
-const float seaSpeed = """ + str(round(rpdat.arm_ocean_speed * 100) / 100) + """;
-const float seaFreq = """ + str(round(rpdat.arm_ocean_freq * 100) / 100) + """;
-const vec3 seaBaseColor = vec3(""" + str(round(rpdat.arm_ocean_base_color[0] * 100) / 100) + """, """ + str(round(rpdat.arm_ocean_base_color[1] * 100) / 100) + """, """ + str(round(rpdat.arm_ocean_base_color[2] * 100) / 100) + """);
-const vec3 seaWaterColor = vec3(""" + str(round(rpdat.arm_ocean_water_color[0] * 100) / 100) + """, """ + str(round(rpdat.arm_ocean_water_color[1] * 100) / 100) + """, """ + str(round(rpdat.arm_ocean_water_color[2] * 100) / 100) + """);
-const float seaFade = """ + str(round(rpdat.arm_ocean_fade * 100) / 100) + """;
+"""const float waterLevel = """ + str(round(rpdat.arm_water_level * 100) / 100) + """;
+const float waterDisplace = """ + str(round(rpdat.arm_water_displace * 100) / 100) + """;
+const float waterSpeed = """ + str(round(rpdat.arm_water_speed * 100) / 100) + """;
+const float waterFreq = """ + str(round(rpdat.arm_water_freq * 100) / 100) + """;
+const vec3 waterColor = vec3(""" + str(round(rpdat.arm_water_color[0] * 100) / 100) + """, """ + str(round(rpdat.arm_water_color[1] * 100) / 100) + """, """ + str(round(rpdat.arm_water_color[2] * 100) / 100) + """);
+const float waterDensity = """ + str(round(rpdat.arm_water_density * 100) / 100) + """;
+const float waterRefract = """ + str(round(rpdat.arm_water_refract * 100) / 100) + """;
+const float waterReflect = """ + str(round(rpdat.arm_water_reflect * 100) / 100) + """;
 """)
         if rpdat.rp_ssgi == 'SSAO' or rpdat.rp_ssgi == 'RTAO' or rpdat.rp_volumetriclight:
             f.write(
@@ -535,6 +526,7 @@ const int volumSteps = """ + str(rpdat.arm_volumetric_light_steps) + """;
         if rpdat.rp_autoexposure:
             f.write(
 """const float autoExposureStrength = """ + str(rpdat.arm_autoexposure_strength) + """;
+const float autoExposureSpeed = """ + str(rpdat.arm_autoexposure_speed) + """;
 """)
 
         # Compositor
@@ -558,9 +550,9 @@ const int volumSteps = """ + str(rpdat.arm_volumetric_light_steps) + """;
 """const float compoSharpenStrength = """ + str(round(rpdat.arm_sharpen_strength * 100) / 100) + """;
 """)
 
-        if bpy.data.scenes[0].cycles.film_exposure != 1.0:
+        if bpy.data.scenes[0].view_settings.exposure != 0.0:
             f.write(
-"""const float compoExposureStrength = """ + str(round(bpy.data.scenes[0].cycles.film_exposure * 100) / 100) + """;
+"""const float compoExposureStrength = """ + str(round(bpy.data.scenes[0].view_settings.exposure * 100) / 100) + """;
 """)
 
         if rpdat.arm_fog:
@@ -570,22 +562,49 @@ const float compoFogAmountB = """ + str(round(rpdat.arm_fog_amountb * 100) / 100
 const vec3 compoFogColor = vec3(""" + str(round(rpdat.arm_fog_color[0] * 100) / 100) + """, """ + str(round(rpdat.arm_fog_color[1] * 100) / 100) + """, """ + str(round(rpdat.arm_fog_color[2] * 100) / 100) + """);
 """)
 
-        if len(bpy.data.cameras) > 0 and bpy.data.cameras[0].dof_distance > 0.0:
+        if rpdat.arm_lens_texture_masking:
             f.write(
-"""const float compoDOFDistance = """ + str(round(bpy.data.cameras[0].dof_distance * 100) / 100) + """;
-const float compoDOFFstop = """ + str(round(bpy.data.cameras[0].gpu_dof.fstop * 100) / 100) + """;
+"""const float compoCenterMinClip = """ + str(round(rpdat.arm_lens_texture_masking_centerMinClip * 100) / 100) + """;
+const float compoCenterMaxClip = """ + str(round(rpdat.arm_lens_texture_masking_centerMaxClip * 100) / 100) + """;
+const float compoLuminanceMin = """ + str(round(rpdat.arm_lens_texture_masking_luminanceMin * 100) / 100) + """;
+const float compoLuminanceMax = """ + str(round(rpdat.arm_lens_texture_masking_luminanceMax * 100) / 100) + """;
+const float compoBrightnessExponent = """ + str(round(rpdat.arm_lens_texture_masking_brightnessExp * 100) / 100) + """;
+""")
+
+        if rpdat.rp_chromatic_aberration:
+            f.write(
+"""const float compoChromaticStrength = """ + str(round(rpdat.arm_chromatic_aberration_strength * 100) / 100) + """;
+const int compoChromaticSamples = """ + str(rpdat.arm_chromatic_aberration_samples) + """;
+""")
+
+        if rpdat.arm_chromatic_aberration_type == "Spectral":
+            f.write(
+"""const int compoChromaticType = """ + str(1) + """;
+""")
+        else:
+            f.write(
+"""const int compoChromaticType = """ + str(0) + """;
+""")
+
+        focus_distance = 0.0
+        fstop = 0.0
+        if len(bpy.data.cameras) > 0 and bpy.data.cameras[0].dof.use_dof:
+            focus_distance = bpy.data.cameras[0].dof.focus_distance
+            fstop = bpy.data.cameras[0].dof.aperture_fstop
+
+        if focus_distance > 0.0:
+            f.write(
+"""const float compoDOFDistance = """ + str(round(focus_distance * 100) / 100) + """;
+const float compoDOFFstop = """ + str(round(fstop * 100) / 100) + """;
 const float compoDOFLength = 160.0;
 """) # str(round(bpy.data.cameras[0].lens * 100) / 100)
 
-        if rpdat.rp_gi == 'Voxel GI' or rpdat.rp_gi == 'Voxel AO':
+        if rpdat.rp_voxelao:
             halfext = round(rpdat.arm_voxelgi_dimensions / 2.0)
             f.write(
 """const ivec3 voxelgiResolution = ivec3(""" + str(rpdat.rp_voxelgi_resolution) + """, """ + str(rpdat.rp_voxelgi_resolution) + """, """ + str(int(int(rpdat.rp_voxelgi_resolution) * float(rpdat.rp_voxelgi_resolution_z))) + """);
 const vec3 voxelgiHalfExtents = vec3(""" + str(halfext) + """, """ + str(halfext) + """, """ + str(round(halfext * float(rpdat.rp_voxelgi_resolution_z))) + """);
-const float voxelgiDiff = """ + str(round(rpdat.arm_voxelgi_diff * 100) / 100) + """;
-const float voxelgiSpec = """ + str(round(rpdat.arm_voxelgi_spec * 100) / 100) + """;
 const float voxelgiOcc = """ + str(round(rpdat.arm_voxelgi_occ * 100) / 100) + """;
-const float voxelgiEnv = """ + str(round(rpdat.arm_voxelgi_env * 100) / 100) + """ / 10.0;
 const float voxelgiStep = """ + str(round(rpdat.arm_voxelgi_step * 100) / 100) + """;
 const float voxelgiRange = """ + str(round(rpdat.arm_voxelgi_range * 100) / 100) + """;
 const float voxelgiOffset = """ + str(round(rpdat.arm_voxelgi_offset * 100) / 100) + """;
@@ -598,7 +617,7 @@ const float voxelgiAperture = """ + str(round(rpdat.arm_voxelgi_aperture * 100) 
 """)
 
         # Skinning
-        if rpdat.arm_skin.startswith('GPU'):
+        if rpdat.arm_skin == 'On':
             f.write(
 """const int skinMaxBones = """ + str(rpdat.arm_skin_max_bones) + """;
 """)

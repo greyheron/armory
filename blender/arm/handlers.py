@@ -15,7 +15,8 @@ def on_depsgraph_update_post(self):
         return
 
     # Recache
-    depsgraph = bpy.context.depsgraph
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+
     for update in depsgraph.updates:
         uid = update.id
         if hasattr(uid, 'arm_cached'):

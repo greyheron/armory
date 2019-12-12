@@ -38,7 +38,7 @@ def get_rpasses(material):
             ar.append(con)
         if is_transluc(material) and not material.arm_discard and rpdat.rp_translucency_state != 'Off' and not material.arm_blending:
             ar.append('translucent')
-        if (rpdat.rp_gi == 'Voxel GI' or rpdat.rp_gi == 'Voxel AO') and has_voxels:
+        if rpdat.rp_voxelao and has_voxels:
             ar.append('voxel')
         if rpdat.rp_renderer == 'Forward' and rpdat.rp_depthprepass and not material.arm_blending and not material.arm_particle_flag:
             ar.append('depth')
@@ -72,7 +72,8 @@ def is_transluc_type(node):
     if node.type == 'BSDF_GLASS' or \
        node.type == 'BSDF_TRANSPARENT' or \
        node.type == 'BSDF_TRANSLUCENT' or \
-       (node.type == 'GROUP' and node.node_tree.name.startswith('Armory PBR') and (node.inputs[1].is_linked or node.inputs[1].default_value != 1.0)):
+       (node.type == 'GROUP' and node.node_tree.name.startswith('Armory PBR') and (node.inputs[1].is_linked or node.inputs[1].default_value != 1.0)) or \
+       (node.type == 'BSDF_PRINCIPLED' and len(node.inputs) > 20 and (node.inputs[18].is_linked or node.inputs[18].default_value != 1.0)):
        return True
     return False
 
@@ -98,6 +99,7 @@ def is_emmisive_traverse(node):
 
 def is_emmisive_type(node):
     if node.type == 'EMISSION' or \
-       (node.type == 'GROUP' and node.node_tree.name.startswith('Armory PBR') and (node.inputs[6].is_linked or node.inputs[6].default_value != 0.0)):
+       (node.type == 'GROUP' and node.node_tree.name.startswith('Armory PBR') and (node.inputs[6].is_linked or node.inputs[6].default_value != 0.0)) or \
+       (node.type == 'BSDF_PRINCIPLED' and len(node.inputs) > 20 and (node.inputs[17].is_linked or node.inputs[17].default_value[0] != 0.0)):
        return True
     return False

@@ -15,14 +15,8 @@ class Uniforms {
 	}
 
 	public static function textureLink(object:Object, mat:MaterialData, link:String):kha.Image {
-		if (link == "_smaaSearch") {
-			return Scene.active.embedded.get('smaa_search.png');
-		}
-		else if (link == "_smaaArea") {
-			return Scene.active.embedded.get('smaa_area.png');
-		}
 		#if arm_ltc
-		else if (link == "_ltcMat") {
+		if (link == "_ltcMat") {
 			if (armory.data.ConstData.ltcMatTex == null) armory.data.ConstData.initLTC();
 			return armory.data.ConstData.ltcMatTex;
 		}
@@ -31,15 +25,6 @@ class Uniforms {
 			return armory.data.ConstData.ltcMagTex;
 		}
 		#end
-		else if (link == "_lensTexture") {
-			return Scene.active.embedded.get('lenstexture.jpg');
-		}
-		else if (link == "_lutTexture") {
-			return Scene.active.embedded.get('luttexture.jpg');
-		}
-		else if (link == "_cloudsTexture") {
-			return Scene.active.embedded.get('cloudstexture.png');
-		}
 		return null;
 	}
 
@@ -157,7 +142,7 @@ class Uniforms {
 			}
 		}
 		#end
-		#if arm_voxelgi
+		#if rp_voxelao
 		if (link == "_cameraPositionSnap") {
 			v = iron.object.Uniforms.helpVec;
 			var camera = iron.Scene.active.camera;
@@ -178,6 +163,17 @@ class Uniforms {
 		#if rp_dynres
 		if (link == "_dynamicScale") {
 			return armory.renderpath.DynamicResolutionScale.dynamicScale;
+		}
+		#end
+		#if arm_debug
+		if (link == "_debugFloat") {
+			return armory.trait.internal.DebugConsole.debugFloat;
+		}
+		#end
+		#if rp_voxelao
+		if (link == "_voxelBlend") { // Blend current and last voxels
+			var freq = armory.renderpath.RenderPathCreator.voxelFreq;
+			return (armory.renderpath.RenderPathCreator.voxelFrame % freq) / freq;
 		}
 		#end
 		return null;

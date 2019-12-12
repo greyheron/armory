@@ -8,10 +8,22 @@ class RenderPathDeferred {
 
 	static var path:RenderPath;
 
-	#if (rp_gi != "Off")
+	#if rp_voxelao
 	static var voxels = "voxels";
 	static var voxelsLast = "voxels";
 	#end
+
+	public static function setTargetMeshes() {
+		#if rp_gbuffer2
+		{
+			path.setTarget("gbuffer0", ["gbuffer1", "gbuffer2"]);
+		}
+		#else
+		{
+			path.setTarget("gbuffer0", ["gbuffer1"]);
+		}
+		#end
+	}
 
 	public static function drawMeshes() {
 		path.drawMeshes("mesh");
@@ -25,10 +37,6 @@ class RenderPathDeferred {
 
 		path = _path;
 
-		// #if (rp_shadowmap && kha_webgl)
-		// Inc.initEmpty();
-		// #end
-
 		#if (rp_background == "World")
 		{
 			path.loadShader("shader_datas/world_pass/world_pass");
@@ -41,12 +49,10 @@ class RenderPathDeferred {
 		}
 		#end
 
-		#if (rp_gi != "Off")
+		#if rp_voxelao
 		{
 			Inc.initGI();
-			#if (rp_gi == "Voxel AO")
 			path.loadShader("shader_datas/deferred_light/deferred_light_VoxelAOvar");
-			#end
 		}
 		#end
 
@@ -73,14 +79,7 @@ class RenderPathDeferred {
 			t.format = Inc.getHdrFormat();
 			t.scale = Inc.getSuperSampling();
 			t.depth_buffer = "main";
-			#if rp_autoexposure
-			t.mipmaps = true;
-			#end
 			path.createRenderTarget(t);
-			#if rp_autoexposure
-			// Texture lod is fetched manually, prevent mipmap filtering
-			t.mipmaps = false;
-			#end
 		}
 
 		{
@@ -249,9 +248,10 @@ class RenderPathDeferred {
 		}
 		#end
 
-		#if rp_ocean
+		#if rp_water
 		{
 			path.loadShader("shader_datas/water_pass/water_pass");
+			path.loadShader("shader_datas/copy_pass/copy_pass");
 		}
 		#end
 
@@ -281,6 +281,21 @@ class RenderPathDeferred {
 			path.loadShader("shader_datas/blur_gaus_pass/blur_gaus_pass_x");
 			path.loadShader("shader_datas/blur_gaus_pass/blur_gaus_pass_y");
 			path.loadShader("shader_datas/blur_gaus_pass/blur_gaus_pass_y_blend");
+		}
+		#end
+
+		#if rp_autoexposure
+		{
+			var t = new RenderTargetRaw();
+			t.name = "histogram";
+			t.width = 1;
+			t.height = 1;
+			t.format = Inc.getHdrFormat();
+			path.createRenderTarget(t);
+		}
+
+		{
+			path.loadShader("shader_datas/histogram_pass/histogram_pass");
 		}
 		#end
 
@@ -363,18 +378,18 @@ class RenderPathDeferred {
 			path.renderTargets.set(t.name, rt);
 		}
 		#end
+
+		#if rp_chromatic_aberration
+		{
+			path.loadShader("shader_datas/chromatic_aberration_pass/chromatic_aberration_pass");
+			path.loadShader("shader_datas/copy_pass/copy_pass");
+		}
+		#end
+
 	}
 
 	@:access(iron.RenderPath)
 	public static function commands() {
-
-		#if rp_dynres
-		{
-			if (armory.data.Config.raw.rp_dynres != false) {
-				DynamicResolutionScale.run(path);
-			}
-		}
-		#end
 
 		path.setTarget("gbuffer0"); // Only clear gbuffer0
 		#if (rp_background == "Clear")
@@ -391,11 +406,16 @@ class RenderPathDeferred {
 		{
 			path.setTarget("gbuffer2");
 			path.clearTarget(0xff000000);
-			path.setTarget("gbuffer0", ["gbuffer1", "gbuffer2"]);
 		}
-		#else
+		#end
+
+		RenderPathCreator.setTargetMeshes();
+
+		#if rp_dynres
 		{
-			path.setTarget("gbuffer0", ["gbuffer1"]);
+			if (armory.data.Config.raw.rp_dynres != false) {
+				DynamicResolutionScale.run(path);
+			}
 		}
 		#end
 
@@ -443,9 +463,6 @@ class RenderPathDeferred {
 				path.bindTarget("_main", "gbufferD");
 				#end
 				path.bindTarget("gbuffer0", "gbuffer0");
-				// #if (rp_ssgi == "RTGI")
-				// path.bindTarget("gbuffer1", "gbuffer1");
-				// #end
 				path.drawShader("shader_datas/ssgi_pass/ssgi_pass");
 
 				path.setTarget("singleb");
@@ -485,17 +502,10 @@ class RenderPathDeferred {
 		#end
 
 		// Voxels
-		#if (rp_gi != "Off")
+		#if rp_voxelao
 		if (armory.data.Config.raw.rp_gi != false)
 		{
 			var voxelize = path.voxelize();
-
-			#if ((rp_gi == "Voxel GI") && (rp_voxelgi_relight))
-			// Relight if light was moved
-			for (light in iron.Scene.active.lights) {
-				if (light.transform.diff()) { voxelize = true; break; }
-			}
-			#end
 
 			#if arm_voxelgi_temporal
 			voxelize = ++RenderPathCreator.voxelFrame % RenderPathCreator.voxelFreq == 0;
@@ -508,36 +518,15 @@ class RenderPathDeferred {
 
 			if (voxelize) {
 				var res = Inc.getVoxelRes();
-
-				// #if (rp_gi == "Voxel GI")
-				// var voxtex = "voxelsOpac";
-				// #else
 				var voxtex = voxels;
-				// #end
 
 				path.clearImage(voxtex, 0x00000000);
 				path.setTarget("");
 				path.setViewport(res, res);
 				path.bindTarget(voxtex, "voxels");
-				#if (rp_gi == "Voxel GI")
-				// path.bindTarget("voxelsNor", "voxelsNor");
-				for (l in iron.Scene.active.lights) {
-					if (!l.visible || !l.data.raw.cast_shadow || l.data.raw.type != "sun") continue;
-					var n = "shadowMap";
-					path.bindTarget(n, n);
-					break;
-				}
-				#end
 				path.drawMeshes("voxel");
 				path.generateMipmaps(voxels);
 			}
-
-			// if (relight) {
-			// 	Inc.computeVoxelsBegin();
-			// 	Inc.computeVoxels();
-			// 	Inc.computeVoxelsEnd();
-			// 	path.generateMipmaps(voxels);
-			// }
 		}
 		#end
 
@@ -562,10 +551,10 @@ class RenderPathDeferred {
 		}
 		#end
 		var voxelao_pass = false;
-		#if (rp_gi != "Off")
+		#if rp_voxelao
 		if (armory.data.Config.raw.rp_gi != false)
 		{
-			#if (arm_config && (rp_gi == "Voxel AO"))
+			#if arm_config
 			voxelao_pass = true;
 			#end
 			path.bindTarget(voxels, "voxels");
@@ -615,10 +604,14 @@ class RenderPathDeferred {
 		}
 		#end
 
-		#if rp_ocean
+		#if rp_water
 		{
+			path.setTarget("buf");
+			path.bindTarget("tex", "tex");
+			path.drawShader("shader_datas/copy_pass/copy_pass");
 			path.setTarget("tex");
 			path.bindTarget("_main", "gbufferD");
+			path.bindTarget("buf", "tex");
 			path.drawShader("shader_datas/water_pass/water_pass");
 		}
 		#end
@@ -790,6 +783,17 @@ class RenderPathDeferred {
 		}
 		#end
 
+		#if rp_chromatic_aberration
+		{
+			path.setTarget("buf");
+			path.bindTarget("tex","tex");
+			path.drawShader("shader_datas/chromatic_aberration_pass/chromatic_aberration_pass");
+			path.setTarget("tex");
+			path.bindTarget("buf", "tex");
+			path.drawShader("shader_datas/copy_pass/copy_pass");
+		}
+		#end
+
 		// We are just about to enter compositing, add more custom passes here
 		// #if rp_custom_pass
 		// {
@@ -799,7 +803,13 @@ class RenderPathDeferred {
 		// Begin compositor
 		#if rp_autoexposure
 		{
-			path.generateMipmaps("tex");
+			path.setTarget("histogram");
+			#if (rp_antialiasing == "TAA")
+			path.bindTarget("taa", "tex");
+			#else
+			path.bindTarget("tex", "tex");
+			#end
+			path.drawShader("shader_datas/histogram_pass/histogram_pass");
 		}
 		#end
 
@@ -809,17 +819,19 @@ class RenderPathDeferred {
 		var framebuffer = "";
 		#end
 
+		RenderPathCreator.finalTarget = path.currentTarget;
+		
+		var target = "";
 		#if ((rp_antialiasing == "Off") || (rp_antialiasing == "FXAA") || (!rp_render_to_texture))
 		{
-			RenderPathCreator.finalTarget = path.currentTarget;
-			path.setTarget(framebuffer);
+			target = framebuffer;
 		}
 		#else
 		{
-			RenderPathCreator.finalTarget = path.currentTarget;
-			path.setTarget("buf");
+			target = "buf";
 		}
 		#end
+		path.setTarget(target);
 		
 		path.bindTarget("tex", "tex");
 		#if rp_compositordepth
@@ -828,9 +840,20 @@ class RenderPathDeferred {
 		}
 		#end
 
+		#if rp_autoexposure
+		{
+			path.bindTarget("histogram", "histogram");
+		}
+		#end
+
 		#if rp_compositornodes
 		{
-			if (!path.isProbe) path.drawShader("shader_datas/compositor_pass/compositor_pass");
+			#if rp_probes
+			var isProbe = path.isProbe;
+			#else
+			var isProbe = false;
+			#end
+			if (!isProbe) path.drawShader("shader_datas/compositor_pass/compositor_pass");
 			else path.drawShader("shader_datas/copy_pass/copy_pass");
 		}
 		#else
@@ -842,6 +865,7 @@ class RenderPathDeferred {
 
 		#if rp_overlays
 		{
+			path.setTarget(target);
 			path.clearTarget(null, 1.0);
 			path.drawMeshes("overlay");
 		}

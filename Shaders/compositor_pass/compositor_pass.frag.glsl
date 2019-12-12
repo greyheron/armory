@@ -20,7 +20,7 @@ uniform sampler2D lensTexture;
 uniform sampler2D lutTexture;
 #endif
 
-#ifdef _Hist
+#ifdef _AutoExposure
 uniform sampler2D histogram;
 #endif
 
@@ -219,15 +219,15 @@ void main() {
 		textureLod(tex, texCo + dir * 0.5, 0.0).rgb);
 	
 	float lumaB = dot(rgbB, luma);
-	if ((lumaB < lumaMin) || (lumaB > lumaMax)) fragColor.rgb = rgbA;
-	else fragColor.rgb = rgbB;
+	if ((lumaB < lumaMin) || (lumaB > lumaMax)) fragColor = vec4(rgbA, 1.0);
+	else fragColor = vec4(rgbB, 1.0);
 
 #else
 	
 	#ifdef _CDOF
-	fragColor.rgb = dof(texCo, depth, tex, gbufferD, texStep, cameraProj);
+	fragColor = vec4(dof(texCo, depth, tex, gbufferD, texStep, cameraProj), 1.0);
 	#else
-	fragColor.rgb = textureLod(tex, texCo, 0.0).rgb;
+	fragColor = textureLod(tex, texCo, 0.0);
 	#endif
 
 #endif
@@ -284,38 +284,12 @@ void main() {
 #endif
 
 #ifdef _CExposure
-	fragColor.rgb *= compoExposureStrength;
+	fragColor.rgb += fragColor.rgb * compoExposureStrength;
 #endif
 
 #ifdef _AutoExposure
-	vec3 expo = textureLod(tex, vec2(0,0), 100).rgb;
-	fragColor.rgb *= vec3(1.0) - min(expo, vec3(autoExposureStrength));
-#endif
-#ifdef _Hist // Auto-exposure
-	if (texCoord.x < 0.1) fragColor.rgb = textureLod(histogram, vec2(0, 0), 9.0).rrr; // 512x512
-	// float minBrightness = 0.03f;
-	// float maxBrightness = 2.0f;
-	// float minAdaptation = 0.60f;
-	// float maxAdaptation = 0.9f;
-	// float minFractionSum = minAdaptation * sumValue;
-	// float maxFractionSum = maxAdaptation * sumValue;
-	// float sumWithoutOutliers = 0.0f;
-	// float sumWithoutOutliersRaw = 0.0f;
-	// for (int i = 0; i < numHistogramBuckets; ++i) {
-	// 	float localValue = luminanceHistogram[i];
-	// 	float vmin = min(localValue, minFractionSum);
-	// 	localValue -= vmin;
-	// 	localValue = localValue - vmin;
-	// 	minFractionSum -= vmin;
-	// 	maxFractionSum -= vmin;
-	// 	localValue = min(localValue, maxFractionSum);
-	// 	maxFractionSum -= localValue;
-	// 	float luminanceAtBucket = GetLuminanceAtBucket(i);
-	// 	sumWithoutOutliers += luminanceAtBucket * localValue;
-	// 	sumWithoutOutliersRaw += localValue;
-	// }
-	// float unclampedLuminance = sumWithoutOutliers / max(0.0001f, sumWithoutOutliersRaw);
-	// float clampedLuminace = clamp(unclampedLuminance, minBrightness, maxBrightness);
+	float expo = 2.0 - clamp(length(textureLod(histogram, vec2(0.5, 0.5), 0).rgb), 0.0, 1.0);
+	fragColor.rgb *= pow(expo, autoExposureStrength * 2.0);
 #endif
 
 #ifdef _CToneFilmic
@@ -353,7 +327,23 @@ void main() {
 // #endif
 
 #ifdef _CLensTex
-	fragColor.rgb += textureLod(lensTexture, texCo, 0.0).rgb;
+	#ifdef _CLensTexMasking
+		vec4 scratches = texture(lensTexture, texCo);
+		vec3 scratchBlend = fragColor.rgb + scratches.rgb;
+
+		float centerMaxClip = compoCenterMaxClip;
+		float centerMinClip = compoCenterMinClip;
+		float luminanceMax = compoLuminanceMax;
+		float luminanceMin = compoLuminanceMin;
+		float brightnessExp = compoBrightnessExponent;
+		
+		float center = smoothstep(centerMaxClip, centerMinClip, length(texCo - 0.5));
+		float luminance = dot(fragColor.rgb, vec3(0.299, 0.587, 0.114));
+		float brightnessMap = smoothstep(luminanceMax, luminanceMin, luminance * center);
+		fragColor.rgb = clamp(mix(fragColor.rgb, scratchBlend, brightnessMap * brightnessExp), 0, 1);
+	#else
+		fragColor.rgb += textureLod(lensTexture, texCo, 0.0).rgb;
+	#endif
 #endif
 
 #ifdef _CLetterbox

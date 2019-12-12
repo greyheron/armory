@@ -4,7 +4,7 @@ from bpy.types import Node, NodeSocket
 from arm.logicnode.arm_nodes import *
 
 class CanvasSetLocationNode(Node, ArmLogicTreeNode):
-    '''Set canvas element position'''
+    '''Set canvas element location'''
     bl_idname = 'LNCanvasSetLocationNode'
     bl_label = 'Canvas Set Location'
     bl_icon = 'QUESTION'

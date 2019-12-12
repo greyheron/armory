@@ -74,48 +74,111 @@ class ArmOpenNodeSource(bpy.types.Operator):
             webbrowser.open('https://github.com/armory3d/armory/tree/master/Sources/armory/logicnode/' + name + '.hx')
         return{'FINISHED'}
 
-class ArmNodeSearch(bpy.types.Operator):
-    '''Search nodes'''
-    bl_idname = "arm.node_search"
-    bl_label = "Node Search"
-    bl_options = {"REGISTER"}
-    bl_property = "item"
+# node replacement code
+replacements = {}
 
-    def get_items(self, context):
-        items = []
-        for n in registered_nodes:
-            items.append((n.bl_idname, n.bl_label, ''))
-        return items
+def add_replacement(item):
+    replacements[item.from_node] = item
+    
+def get_replaced_nodes():
+    return replacements.keys()
 
-    item: EnumProperty(items=get_items)
+def get_replacement_for_node(node):
+    return replacements[node.bl_idname]
 
-    def invoke(self, context, event):
-        context.window_manager.invoke_search_popup(self)
-        return {"CANCELLED"}
+class Replacement:
+    # represents a single replacement rule, this can replace exactly one node with another
+    #
+    # from_node: the node type to be removed
+    # to_node: the node type which takes from_node's place
+    # *SocketMapping: a map which defines how the sockets of the old node shall be connected to the new node
+    # {1: 2} means that anything connected to the socket with index 1 on the original node will be connected to the socket with index 2 on the new node
+    def __init__(self, from_node, to_node, in_socket_mapping, out_socket_mapping, property_mapping):
+        self.from_node = from_node
+        self.to_node = to_node
+        self.in_socket_mapping = in_socket_mapping
+        self.out_socket_mapping = out_socket_mapping
+        self.property_mapping = property_mapping
+
+# actual replacement code
+def replace(tree, node):
+    replacement = get_replacement_for_node(node)
+    newnode = tree.nodes.new(replacement.to_node)
+    newnode.location = node.location
+    newnode.parent = node.parent
+
+    parent = node.parent
+    while parent is not None:
+        newnode.location[0] += parent.location[0]
+        newnode.location[1] += parent.location[1]
+        parent = parent.parent
+    
+    
+    # map properties
+    for prop in replacement.property_mapping.keys():
+        setattr(newnode, replacement.property_mapping.get(prop), getattr(node, prop))
+    
+    # map unconnected inputs
+    for in_socket in replacement.in_socket_mapping.keys():
+        if not node.inputs[in_socket].is_linked:
+            newnode.inputs[replacement.in_socket_mapping.get(in_socket)].default_value = node.inputs[in_socket].default_value
+    
+    # map connected inputs
+    for link in tree.links:
+        if link.from_node == node:
+            # this is an output link
+            for i in range(0, len(node.outputs)):
+                # check the outputs
+                # i represents the socket index
+                # do we want to remap it & is it the one referenced in the current link
+                if i in replacement.out_socket_mapping.keys() and node.outputs[i] == link.from_socket:
+                    tree.links.new(newnode.outputs[replacement.out_socket_mapping.get(i)], link.to_socket)
+        
+        if link.to_node == node:
+            # this is an input link
+            for i in range(0, len(node.inputs)):
+                # check the inputs
+                # i represents the socket index
+                # do we want to remap it & is it the one referenced socket in the current link
+                if i in replacement.in_socket_mapping.keys() and node.inputs[i] == link.to_socket:
+                    tree.links.new(newnode.inputs[replacement.in_socket_mapping.get(i)], link.from_socket)
+    tree.nodes.remove(node)
+
+def replaceAll():
+    for tree in bpy.data.node_groups:
+        if tree.bl_idname == "ArmLogicTreeType":
+            for node in tree.nodes:
+                if node.bl_idname in get_replaced_nodes():
+                    print("Replacing "+ node.bl_idname+ " in Tree "+tree.name)
+                    replace(tree, node)
+        
+    
+class ReplaceNodesOperator(bpy.types.Operator):
+    '''Automatically replaces deprecated nodes.'''
+    bl_idname = "node.replace"
+    bl_label = "Replace Nodes"
 
     def execute(self, context):
-        bpy.ops.node.add_node(type=self.item, use_transform=True)
-        return bpy.ops.node.translate_attach_remove_on_cancel('INVOKE_DEFAULT')
+        replaceAll()
+        return {'FINISHED'}
 
-def draw_menu(self, context):
-    if context.space_data.tree_type != "ArmLogicTreeType":
-        return
-    layout = self.layout
-    layout.operator_context = "INVOKE_DEFAULT"
-    layout.operator("arm.node_search", text="Search", icon="VIEWZOOM")
-    layout.separator()
+    @classmethod
+    def poll(cls, context):
+        return context.space_data != None and context.space_data.type == 'NODE_EDITOR'
+
+# TODO: deprecated
+# Input Replacement Rules
+# add_replacement(Replacement("LNOnGamepadNode", "LNMergedGamepadNode", {0: 0}, {0: 0}, {"property0": "property0", "property1": "property1"}))
 
 def register():
     bpy.utils.register_class(ArmLogicTree)
     bpy.utils.register_class(ARM_PT_LogicNodePanel)
     bpy.utils.register_class(ArmOpenNodeSource)
+    bpy.utils.register_class(ReplaceNodesOperator)
     register_nodes()
-    bpy.utils.register_class(ArmNodeSearch)
-    bpy.types.NODE_MT_add.prepend(draw_menu)
 
 def unregister():
-    bpy.types.NODE_MT_add.remove(draw_menu)
-    bpy.utils.unregister_class(ArmNodeSearch)
+    bpy.utils.unregister_class(ReplaceNodesOperator)
     unregister_nodes()
     bpy.utils.unregister_class(ArmLogicTree)
     bpy.utils.unregister_class(ARM_PT_LogicNodePanel)

@@ -8,6 +8,17 @@ import iron.math.Vec4;
 import iron.math.RayCaster;
 import iron.data.SceneFormat;
 
+class Hit {
+	public var rb:RigidBody;
+	public var pos:Vec4;
+	public var normal:Vec4;
+	public function new(rb:RigidBody, pos:Vec4, normal:Vec4){
+		this.rb = rb;
+		this.pos = pos;
+		this.normal = normal;
+	}
+}
+
 class ContactPair {
 	public var a:Int;
 	public var b:Int;
@@ -47,8 +58,8 @@ class PhysicsWorld extends Trait {
 	var pairCache:Bool = false;
 
 	static var nullvec = true;
-	var vec1:bullet.Bt.Vector3 = null;
-	var vec2:bullet.Bt.Vector3 = null;
+	static var vec1:bullet.Bt.Vector3 = null;
+	static var vec2:bullet.Bt.Vector3 = null;
 
 	#if arm_debug
 	public static var physTime = 0.0;
@@ -140,9 +151,9 @@ class PhysicsWorld extends Trait {
 
 	public function addRigidBody(body:RigidBody) {
 		#if js
-		world.addRigidBodyToGroup(body.body, body.group, body.group);
+		world.addRigidBodyToGroup(body.body, body.group, body.mask);
 		#else
-		world.addRigidBody(body.body, body.group, body.group);
+		world.addRigidBody(body.body, body.group, body.mask);
 		#end
 		rbMap.set(body.id, body);
 	}
@@ -225,6 +236,11 @@ class PhysicsWorld extends Trait {
 		}
 		return res;
 	}
+	
+	public function findBody(id:Int):RigidBody{
+		var rb = rbMap.get(id);
+		return rb;
+	}
 
 	function lateUpdate() {
 		var t = Time.delta * timeScale;
@@ -296,20 +312,30 @@ class PhysicsWorld extends Trait {
 		var start = new Vec4();
 		var end = new Vec4();
 		RayCaster.getDirection(start, end, inputX, inputY, camera);
-		return rayCast(camera.transform.world.getLoc(), end);
+		var hit = rayCast(camera.transform.world.getLoc(), end);
+		var rb = (hit != null) ? hit.rb : null;
+		return rb;
 	}
 
-	public function rayCast(from:Vec4, to:Vec4):RigidBody {
+	public function rayCast(from:Vec4, to:Vec4, group:Int=0x00000001,mask=0xFFFFFFFF):Hit {
 		var rayFrom = vec1;
 		var rayTo = vec2;
 		rayFrom.setValue(from.x, from.y, from.z);
 		rayTo.setValue(to.x, to.y, to.z);
 
 		var rayCallback = new bullet.Bt.ClosestRayResultCallback(rayFrom, rayTo);
+		#if js
+		rayCallback.set_m_collisionFilterGroup(group);
+		rayCallback.set_m_collisionFilterMask(mask);
+		#elseif cpp
+		rayCallback.m_collisionFilterGroup = group;
+		rayCallback.m_collisionFilterMask = mask;
+		#end
 		var worldDyn:bullet.Bt.DynamicsWorld = world;
 		var worldCol:bullet.Bt.CollisionWorld = worldDyn;
 		worldCol.rayTest(rayFrom, rayTo, rayCallback);
 		var rb:RigidBody = null;
+		var hitInfo:Hit = null;
 
 		var rc:bullet.Bt.RayResultCallback = rayCallback;
 		if (rc.hasHit()) {
@@ -321,12 +347,14 @@ class PhysicsWorld extends Trait {
 			var norm = rayCallback.get_m_hitNormalWorld();
 			hitNormalWorld.set(norm.x(), norm.y(), norm.z());
 			rb = rbMap.get(untyped body.userIndex);
+			hitInfo = new Hit(rb,hitPointWorld,hitNormalWorld);
 			#elseif cpp
 			var hit = rayCallback.m_hitPointWorld;
 			hitPointWorld.set(hit.x(), hit.y(), hit.z());
 			var norm = rayCallback.m_hitNormalWorld;
 			hitNormalWorld.set(norm.x(), norm.y(), norm.z());
 			rb = rbMap.get(rayCallback.m_collisionObject.getUserIndex());
+			hitInfo = new Hit(rb,hitPointWorld,hitNormalWorld);
 			#end
 		}
 
@@ -336,7 +364,7 @@ class PhysicsWorld extends Trait {
 		rayCallback.delete();
 		#end
 
-		return rb;
+		return hitInfo;
 	}
 
 	public function notifyOnPreUpdate(f:Void->Void) {

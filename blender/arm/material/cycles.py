@@ -182,10 +182,8 @@ def parse_shader(node, socket):
                 parse_normal_map_color_input(node.inputs[5])
                 # Emission
                 if node.inputs[6].is_linked or node.inputs[6].default_value != 0.0:
-                    out_emission = '1.0'
-                    emission_strength = parse_value_input(node.inputs[6])
+                    out_emission = parse_value_input(node.inputs[6])
                     emission_found = True
-                    out_basecol = '({0} * {1})'.format(out_basecol, emission_strength)
             if parse_opacity:
                 out_opacity = parse_value_input(node.inputs[1])
         else:
@@ -228,7 +226,7 @@ def parse_shader(node, socket):
 
     elif node.type == 'BSDF_PRINCIPLED':
         if parse_surface:
-            write_normal(node.inputs[17])
+            write_normal(node.inputs[19])
             out_basecol = parse_vector_input(node.inputs[0])
             # subsurface = parse_vector_input(node.inputs[1])
             # subsurface_radius = parse_vector_input(node.inputs[2])
@@ -245,7 +243,15 @@ def parse_shader(node, socket):
             # clearcoat_rough = parse_vector_input(node.inputs[13])
             # ior = parse_vector_input(node.inputs[14])
             # transmission = parse_vector_input(node.inputs[15])
-            # transmission_roughness = parse_vector_input(node.inputs[16]) # Hidden socket
+            # transmission_roughness = parse_vector_input(node.inputs[16])
+            if node.inputs[17].is_linked or node.inputs[17].default_value[0] != 0.0:
+                out_emission = '({0}.x)'.format(parse_vector_input(node.inputs[17]))
+                emission_found = True
+            # clearcoar_normal = parse_vector_input(node.inputs[20])
+            # tangent = parse_vector_input(node.inputs[21])
+        if parse_opacity:
+            if len(node.inputs) > 20:
+                out_opacity = parse_value_input(node.inputs[18])
 
     elif node.type == 'BSDF_DIFFUSE':
         if parse_surface:
@@ -470,7 +476,7 @@ def parse_vector(node, socket):
         tex_link = node.name if node.arm_material_param else None
         if tex != None:
             curshader.write_textures += 1
-            to_linear = node.color_space == 'COLOR'
+            to_linear = node.image != None and node.image.colorspace_settings.name == 'sRGB'
             res = '{0}.rgb'.format(texture_store(node, tex, tex_name, to_linear, tex_link=tex_link))
             curshader.write_textures -= 1
             return res
@@ -478,8 +484,7 @@ def parse_vector(node, socket):
             tex = {}
             tex['name'] = tex_name
             tex['file'] = ''
-            to_linear = node.color_space == 'COLOR'
-            return '{0}.rgb'.format(texture_store(node, tex, tex_name, to_linear, tex_link=tex_link))
+            return '{0}.rgb'.format(texture_store(node, tex, tex_name, to_linear=False, tex_link=tex_link))
         else:
             global parsed
             tex_store = store_var_name(node) # Pink color for missing texture
@@ -519,7 +524,7 @@ def parse_vector(node, socket):
         curshader.add_function(c_functions.str_tex_noise)
         assets_add(get_sdk_path() + '/armory/Assets/' + 'noise256.png')
         assets_add_embedded_data('noise256.png')
-        curshader.add_uniform('sampler2D snoise256', link='_noise256')
+        curshader.add_uniform('sampler2D snoise256', link='$noise256.png')
         curshader.add_function(c_functions.str_tex_noise)
         if node.inputs[0].is_linked:
             co = parse_vector_input(node.inputs[0])
@@ -546,7 +551,7 @@ def parse_vector(node, socket):
         curshader.add_function(c_functions.str_tex_voronoi)
         assets_add(get_sdk_path() + '/armory/Assets/' + 'noise256.png')
         assets_add_embedded_data('noise256.png')
-        curshader.add_uniform('sampler2D snoise256', link='_noise256')
+        curshader.add_uniform('sampler2D snoise256', link='$noise256.png')
         if node.inputs[0].is_linked:
             co = parse_vector_input(node.inputs[0])
         else:
@@ -750,10 +755,10 @@ def parse_vector(node, socket):
     elif node.type == 'PARTICLE_INFO':
         if socket == node.outputs[3]: # Location
             particle_info['location'] = True
-            return 'p_location' if arm.utils.get_rp().arm_particles == 'GPU' else 'vec3(0.0)'
+            return 'p_location' if arm.utils.get_rp().arm_particles == 'On' else 'vec3(0.0)'
         elif socket == node.outputs[5]: # Velocity
             particle_info['velocity'] = True
-            return 'p_velocity' if arm.utils.get_rp().arm_particles == 'GPU' else 'vec3(0.0)'
+            return 'p_velocity' if arm.utils.get_rp().arm_particles == 'On' else 'vec3(0.0)'
         elif socket == node.outputs[6]: # Angular Velocity
             particle_info['angular_velocity'] = True
             return 'vec3(0.0)'
@@ -821,11 +826,14 @@ def parse_vector(node, socket):
 
     elif node.type == 'MAPPING':
         out = parse_vector_input(node.inputs[0])
-        if node.scale[0] != 1.0 or node.scale[1] != 1.0 or node.scale[2] != 1.0:
-            out = '({0} * vec3({1}, {2}, {3}))'.format(out, node.scale[0], node.scale[1], node.scale[2])
-        if node.rotation[2] != 0.0:
+        scale = node.inputs['Scale'].default_value
+        rotation = node.inputs['Rotation'].default_value
+        location = node.inputs['Location'].default_value if node.inputs['Location'].enabled else [0.0, 0.0, 0.0]
+        if scale[0] != 1.0 or scale[1] != 1.0 or scale[2] != 1.0:
+            out = '({0} * vec3({1}, {2}, {3}))'.format(out, scale[0], scale[1], scale[2])
+        if rotation[2] != 0.0:
             # ZYX rotation, Z axis for now..
-            a = node.rotation[2]
+            a = rotation[2]
             # x * cos(theta) - y * sin(theta)
             # x * sin(theta) + y * cos(theta)
             out = 'vec3({0}.x * {1} - ({0}.y) * {2}, {0}.x * {2} + ({0}.y) * {1}, 0.0)'.format(out, math.cos(a), math.sin(a))
@@ -836,12 +844,13 @@ def parse_vector(node, socket):
         #     a = node.rotation[0]
         #     out = 'vec3({0}.y * {1} - {0}.z * {2}, {0}.y * {2} + {0}.z * {1}, 0.0)'.format(out, math.cos(a), math.sin(a))
         
-        if node.translation[0] != 0.0 or node.translation[1] != 0.0 or node.translation[2] != 0.0:
-            out = '({0} + vec3({1}, {2}, {3}))'.format(out, node.translation[0], node.translation[1], node.translation[2])
-        if node.use_min:
-            out = 'max({0}, vec3({1}, {2}, {3}))'.format(out, node.min[0], node.min[1])
-        if node.use_max:
-             out = 'min({0}, vec3({1}, {2}, {3}))'.format(out, node.max[0], node.max[1])
+        if location[0] != 0.0 or location[1] != 0.0 or location[2] != 0.0:
+            out = '({0} + vec3({1}, {2}, {3}))'.format(out, location[0], location[1], location[2])
+        # use Extension parameter from the Texture node instead
+        # if node.use_min:
+        #     out = 'max({0}, vec3({1}, {2}, {3}))'.format(out, node.min[0], node.min[1])
+        # if node.use_max:
+        #      out = 'min({0}, vec3({1}, {2}, {3}))'.format(out, node.max[0], node.max[1])
         return out
 
     elif node.type == 'NORMAL':
@@ -1051,13 +1060,13 @@ def parse_value(node, socket):
     elif node.type == 'PARTICLE_INFO':
         if socket == node.outputs[0]: # Index
             particle_info['index'] = True
-            return 'p_index' if arm.utils.get_rp().arm_particles == 'GPU' else '0.0'
+            return 'p_index' if arm.utils.get_rp().arm_particles == 'On' else '0.0'
         elif socket == node.outputs[1]: # Age
             particle_info['age'] = True
-            return 'p_age' if arm.utils.get_rp().arm_particles == 'GPU' else '0.0'
+            return 'p_age' if arm.utils.get_rp().arm_particles == 'On' else '0.0'
         elif socket == node.outputs[2]: # Lifetime
             particle_info['lifetime'] = True
-            return 'p_lifetime' if arm.utils.get_rp().arm_particles == 'GPU' else '0.0'
+            return 'p_lifetime' if arm.utils.get_rp().arm_particles == 'On' else '0.0'
         elif socket == node.outputs[4]: # Size
             particle_info['size'] = True
             return '1.0'
@@ -1177,7 +1186,7 @@ def parse_value(node, socket):
         curshader.add_function(c_functions.str_tex_noise)
         assets_add(get_sdk_path() + '/armory/Assets/' + 'noise256.png')
         assets_add_embedded_data('noise256.png')
-        curshader.add_uniform('sampler2D snoise256', link='_noise256')
+        curshader.add_uniform('sampler2D snoise256', link='$noise256.png')
         if node.inputs[0].is_linked:
             co = parse_vector_input(node.inputs[0])
         else:
@@ -1197,7 +1206,7 @@ def parse_value(node, socket):
         curshader.add_function(c_functions.str_tex_voronoi)
         assets_add(get_sdk_path() + '/armory/Assets/' + 'noise256.png')
         assets_add_embedded_data('noise256.png')
-        curshader.add_uniform('sampler2D snoise256', link='_noise256')
+        curshader.add_uniform('sampler2D snoise256', link='$noise256.png')
         if node.inputs[0].is_linked:
             co = parse_vector_input(node.inputs[0])
         else:
@@ -1247,6 +1256,34 @@ def parse_value(node, socket):
             out_val = '({0} * {1})'.format(val1, val2)
         elif op == 'DIVIDE':
             out_val = '({0} / {1})'.format(val1, val2)
+        elif op == 'POWER':
+            out_val = 'pow({0}, {1})'.format(val1, val2)
+        elif op == 'LOGARITHM':
+            out_val = 'log({0})'.format(val1)
+        elif op == 'SQRT':
+            out_val = 'sqrt({0})'.format(val1)
+        elif op == 'ABSOLUTE':
+            out_val = 'abs({0})'.format(val1)
+        elif op == 'MINIMUM':
+            out_val = 'min({0}, {1})'.format(val1, val2)
+        elif op == 'MAXIMUM':
+            out_val = 'max({0}, {1})'.format(val1, val2)
+        elif op == 'LESS_THAN':
+            out_val = 'float({0} < {1})'.format(val1, val2)
+        elif op == 'GREATER_THAN':
+            out_val = 'float({0} > {1})'.format(val1, val2)
+        elif op == 'ROUND':
+            # out_val = 'round({0})'.format(val1)
+            out_val = 'floor({0} + 0.5)'.format(val1)
+        elif op == 'FLOOR':
+            out_val = 'floor({0})'.format(val1)
+        elif op == 'CEIL':
+            out_val = 'ceil({0})'.format(val1)
+        elif op == 'FRACT':
+            out_val = 'fract({0})'.format(val1)
+        elif op == 'MODULO':
+            # out_val = 'float({0} % {1})'.format(val1, val2)
+            out_val = 'mod({0}, {1})'.format(val1, val2)
         elif op == 'SINE':
             out_val = 'sin({0})'.format(val1)
         elif op == 'COSINE':
@@ -1259,26 +1296,8 @@ def parse_value(node, socket):
             out_val = 'acos({0})'.format(val1)
         elif op == 'ARCTANGENT':
             out_val = 'atan({0})'.format(val1)
-        elif op == 'POWER':
-            out_val = 'pow({0}, {1})'.format(val1, val2)
-        elif op == 'LOGARITHM':
-            out_val = 'log({0})'.format(val1)
-        elif op == 'MINIMUM':
-            out_val = 'min({0}, {1})'.format(val1, val2)
-        elif op == 'MAXIMUM':
-            out_val = 'max({0}, {1})'.format(val1, val2)
-        elif op == 'ROUND':
-            # out_val = 'round({0})'.format(val1)
-            out_val = 'floor({0} + 0.5)'.format(val1)
-        elif op == 'LESS_THAN':
-            out_val = 'float({0} < {1})'.format(val1, val2)
-        elif op == 'GREATER_THAN':
-            out_val = 'float({0} > {1})'.format(val1, val2)
-        elif op == 'MODULO':
-            # out_val = 'float({0} % {1})'.format(val1, val2)
-            out_val = 'mod({0}, {1})'.format(val1, val2)
-        elif op == 'ABSOLUTE':
-            out_val = 'abs({0})'.format(val1)
+        elif op == 'ARCTAN2':
+            out_val = 'atan({0}, {1})'.format(val1, val2)
         if node.use_clamp:
             return 'clamp({0}, 0.0, 1.0)'.format(out_val)
         else:
@@ -1409,10 +1428,18 @@ def texture_store(node, tex, tex_name, to_linear=False, tex_link=None):
         uv_name = 'vec2({0}.x, 1.0 - {0}.y)'.format(uv_name)
     else:
         uv_name = 'texCoord'
-    if mat_texture_grad():
-        curshader.write('vec4 {0} = textureGrad({1}, {2}.xy, g2.xy, g2.zw);'.format(tex_store, tex_name, uv_name))
+    triplanar = node.projection == 'BOX'
+    if triplanar:
+        curshader.write(f'vec3 texCoordBlend = vec3(0.0); vec2 {uv_name}1 = vec2(0.0); vec2 {uv_name}2 = vec2(0.0);') # Temp
+        curshader.write(f'vec4 {tex_store} = vec4(0.0, 0.0, 0.0, 0.0);')
+        curshader.write(f'if (texCoordBlend.x > 0) {tex_store} += texture({tex_name}, {uv_name}.xy) * texCoordBlend.x;')
+        curshader.write(f'if (texCoordBlend.y > 0) {tex_store} += texture({tex_name}, {uv_name}1.xy) * texCoordBlend.y;')
+        curshader.write(f'if (texCoordBlend.z > 0) {tex_store} += texture({tex_name}, {uv_name}2.xy) * texCoordBlend.z;')
     else:
-        curshader.write('vec4 {0} = texture({1}, {2}.xy);'.format(tex_store, tex_name, uv_name))
+        if mat_texture_grad():
+            curshader.write('vec4 {0} = textureGrad({1}, {2}.xy, g2.xy, g2.zw);'.format(tex_store, tex_name, uv_name))
+        else:
+            curshader.write('vec4 {0} = texture({1}, {2}.xy);'.format(tex_store, tex_name, uv_name))
     if sample_bump:
         sample_bump_res = tex_store
         curshader.write('float {0}_1 = textureOffset({1}, {2}.xy, ivec2(-2, 0)).r;'.format(tex_store, tex_name, uv_name))
@@ -1573,8 +1600,6 @@ def make_texture(image_node, tex_name, matname=None):
         interpolation = 'Linear'
     elif texfilter == 'Point':
         interpolation = 'Closest'
-    # if image_node.color_space == NON_COLOR_DATA:
-        # interpolation = image_node.interpolation
 
     # TODO: Blender seems to load full images on size request, cache size instead
     powimage = is_pow(image.size[0]) and is_pow(image.size[1])

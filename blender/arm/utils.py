@@ -3,7 +3,6 @@ import json
 import os
 import glob
 import platform
-import zipfile
 import re
 import subprocess
 import webbrowser
@@ -19,12 +18,8 @@ class NumpyEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 def write_arm(filepath, output):
-    if filepath.endswith('.zip'):
-        with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            if bpy.data.worlds['Arm'].arm_minimize:
-                zip_file.writestr('data.arm', arm.lib.armpack.packb(output))
-            else:
-                zip_file.writestr('data.json', json.dumps(output, sort_keys=True, indent=4, cls=NumpyEncoder))
+    if filepath.endswith('.lz4'):
+        pass
     else:
         if bpy.data.worlds['Arm'].arm_minimize:
             with open(filepath, 'wb') as f:
@@ -90,7 +85,7 @@ def get_gapi():
         return getattr(item, target_to_gapi(item.arm_project_target))
     if wrd.arm_runtime == 'Browser':
         return 'webgl'
-    return arm.utils.get_player_gapi()
+    return 'direct3d11' if get_os() == 'win' else 'opengl'
 
 def get_rp():
     wrd = bpy.data.worlds['Arm']
@@ -124,6 +119,11 @@ def get_sdk_path():
     else:
         return addon_prefs.sdk_path
 
+def get_ide_bin():
+    preferences = bpy.context.preferences
+    addon_prefs = preferences.addons["armory"].preferences
+    return '' if not hasattr(addon_prefs, 'ide_bin') else addon_prefs.ide_bin
+
 def get_ffmpeg_path():
     preferences = bpy.context.preferences
     addon_prefs = preferences.addons['armory'].preferences
@@ -138,11 +138,6 @@ def get_renderdoc_path():
         if os.path.exists(pdefault):
             p = pdefault
     return p
-
-def get_player_gapi():
-    preferences = bpy.context.preferences
-    addon_prefs = preferences.addons['armory'].preferences
-    return 'opengl' if not hasattr(addon_prefs, 'player_gapi_' + get_os()) else getattr(addon_prefs, 'player_gapi_' + get_os())
 
 def get_code_editor():
     preferences = bpy.context.preferences
@@ -209,17 +204,17 @@ def get_haxe_path():
 def get_khamake_path():
     return get_kha_path() + '/make'
 
-def krom_paths(bin_ext=''):
+def krom_paths():
     sdk_path = get_sdk_path()
     if arm.utils.get_os() == 'win':
         krom_location = sdk_path + '/Krom'
-        krom_path = krom_location + '/Krom' + bin_ext + '.exe'
+        krom_path = krom_location + '/Krom.exe'
     elif arm.utils.get_os() == 'mac':
         krom_location = sdk_path + '/Krom/Krom.app/Contents/MacOS'
-        krom_path = krom_location + '/Krom' + bin_ext
+        krom_path = krom_location + '/Krom'
     else:
         krom_location = sdk_path + '/Krom'
-        krom_path = krom_location + '/Krom' + bin_ext
+        krom_path = krom_location + '/Krom'
     return krom_location, krom_path
 
 def fetch_bundled_script_names():
@@ -233,11 +228,13 @@ script_props = {}
 script_props_defaults = {}
 def fetch_script_props(file):
     with open(file) as f:
-        if '/' in file:
-            file = file.split('/')[-1]
-        if '\\' in file:
-            file = file.split('\\')[-1]
         name = file.rsplit('.')[0]
+        if 'Sources' in name:
+            name = name[name.index('Sources')+8:]
+        if '/' in name:
+            name = name.replace('/','.')
+        if '\\' in file:
+            name = name.replace('\\','.')
         script_props[name] = []
         script_props_defaults[name] = []
         lines = f.read().splitlines()
@@ -323,10 +320,15 @@ def fetch_trait_props():
 
 def fetch_prop(o):
     for item in o.arm_traitlist:
-        if item.name not in script_props:
+        name = ''
+        if item.type_prop == 'Bundled Script':
+            name = 'armory.trait.' + item.name
+        else:
+            name = item.name
+        if name not in script_props:
             continue
-        props = script_props[item.name]
-        defaults = script_props_defaults[item.name]
+        props = script_props[name]
+        defaults = script_props_defaults[name]
         # Remove old props
         for i in range(len(item.arm_traitpropslist) - 1, -1, -1):
             ip = item.arm_traitpropslist[i]
@@ -522,72 +524,88 @@ def is_bone_animation_enabled(bobject):
     return False
 
 def export_bone_data(bobject):
-    return bobject.find_armature() and is_bone_animation_enabled(bobject) and get_rp().arm_skin.startswith('GPU')
+    return bobject.find_armature() and is_bone_animation_enabled(bobject) and get_rp().arm_skin == 'On'
 
-def kode_studio_mklink_win(sdk_path):
-    # Fight long-path issues on Windows
-    if not os.path.exists(sdk_path + '/win32/resources/app/kodeExtensions/kha/Kha'):
-        source = sdk_path + '/win32/resources/app/kodeExtensions/kha/Kha'
-        target = sdk_path + '/Kha'
-        subprocess.check_call('mklink /J "%s" "%s"' % (source, target), shell=True)
-    if not os.path.exists(sdk_path + '/win32/resources/app/kodeExtensions/krom/Krom'):
-        source = sdk_path + '/win32/resources/app/kodeExtensions/krom/Krom'
-        target = sdk_path + '/Krom'
-        subprocess.check_call('mklink /J "%s" "%s"' % (source, target), shell=True)
+def open_editor(hx_path=None):
+    ide_bin = get_ide_bin()
 
-def kode_studio_mklink_linux(sdk_path):
-    if not os.path.exists(sdk_path + '/linux64/resources/app/kodeExtensions/kha/Kha'):
-        source = sdk_path + '/linux64/resources/app/kodeExtensions/kha/Kha'
-        target = sdk_path + '/Kha'
-        subprocess.check_call('ln -s "%s" "%s"' % (target, source), shell=True)
-    if not os.path.exists(sdk_path + '/linux64/resources/app/kodeExtensions/krom/Krom'):
-        source = sdk_path + '/linux64/resources/app/kodeExtensions/krom/Krom'
-        target = sdk_path + '/Krom'
-        subprocess.check_call('ln -s "%s" "%s"' % (target, source), shell=True)
+    if hx_path is None:
+        hx_path = arm.utils.get_fp()
 
-def kode_studio_mklink_mac(sdk_path):
-    if not os.path.exists(sdk_path + '/KodeStudio.app/Contents/Resources/app/kodeExtensions/kha/Kha'):
-        source = sdk_path + '/KodeStudio.app/Contents/Resources/app/kodeExtensions/kha/Kha'
-        target = sdk_path + '/Kha'
-        subprocess.check_call('ln -fs "%s" "%s"' % (target, source), shell=True)
-    if not os.path.exists(sdk_path + '/KodeStudio.app/Contents/Resources/app/kodeExtensions/krom/Krom'):
-        source = sdk_path + '/KodeStudio.app/Contents/Resources/app/kodeExtensions/krom/Krom'
-        target = sdk_path + '/Krom'
-        subprocess.check_call('ln -fs "%s" "%s"' % (target, source), shell=True)
+    if get_code_editor() == 'default':
+        # Get editor environment variables
+        # https://unix.stackexchange.com/q/4859
+        env_v_editor = os.environ.get('VISUAL')
+        env_editor = os.environ.get('EDITOR')
 
-def get_kode_path():
-    if get_os() == 'win':
-        return get_sdk_path() + '/win32/Kode Studio.exe'
-    elif get_os() == 'mac':
-        return get_sdk_path() + '/KodeStudio.app/Contents/MacOS/Electron'
-    else:
-        return get_sdk_path() + '/linux64/kodestudio'
+        if env_v_editor is not None:
+            ide_bin = env_v_editor
+        elif env_editor is not None:
+            ide_bin = env_editor
 
-def kode_studio(hx_path=None):
-    project_path = arm.utils.get_fp()
-    kode_path = get_kode_path()
-    if os.path.exists(kode_path) and get_code_editor() == 'kodestudio':
-        if arm.utils.get_os() == 'win':
-            kode_studio_mklink_win(get_sdk_path())
-            args = [kode_path, arm.utils.get_fp()]
-            if hx_path != None:
-                args.append(hx_path)
-            subprocess.Popen(args)
-        elif arm.utils.get_os() == 'mac':
-            kode_studio_mklink_mac(get_sdk_path())
-            args = ['"' + kode_path + '"' + ' "' + arm.utils.get_fp() + '"']
-            if hx_path != None:
-                args[0] += ' "' + hx_path + '"'
-            subprocess.Popen(args, shell=True)
+        # No environment variables set -> Let the system decide how to
+        # open the file
         else:
-            kode_studio_mklink_linux(get_sdk_path())
-            args = [kode_path, arm.utils.get_fp()]
-            if hx_path != None:
-                args.append(hx_path)
+            webbrowser.open('file://' + hx_path)
+            return
+
+    if os.path.exists(ide_bin):
+        args = [ide_bin, arm.utils.get_fp()]
+
+        # Sublime Text
+        if get_code_editor() == 'sublime':
+            project_name = bpy.data.worlds['Arm'].arm_project_name
+            subl_project_path = arm.utils.get_fp() + f'/{project_name}.sublime-project'
+
+            if not os.path.exists(subl_project_path):
+                generate_sublime_project(subl_project_path)
+
+            args += ['--project', subl_project_path]
+
+            args.append('--add')
+
+        args.append(hx_path)
+
+        if arm.utils.get_os() == 'mac':
+            argstr = ""
+
+            for arg in args:
+                if not (arg.startswith('-') or arg.startswith('--')):
+                    argstr += '"' + arg + '"'
+                argstr += ' '
+
+            subprocess.Popen(argstr[:-1], shell=True)
+        else:
             subprocess.Popen(args)
+
     else:
-        fp = hx_path if hx_path != None else arm.utils.get_fp()
-        webbrowser.open('file://' + fp)
+        raise FileNotFoundError(f'Code editor executable not found: {ide_bin}. You can change the path in the Armory preferences.')
+
+def open_folder():
+    if arm.utils.get_os() == 'win':
+        subprocess.Popen(['explorer', arm.utils.get_fp()])
+    elif arm.utils.get_os() == 'mac':
+        subprocess.Popen(['open', arm.utils.get_fp()])
+    elif arm.utils.get_os() == 'linux':
+        subprocess.Popen(['xdg-open', arm.utils.get_fp()])
+    else:
+        webbrowser.open('file://' + arm.utils.get_fp())
+
+def generate_sublime_project(subl_project_path):
+    """Generates a [project_name].sublime-project file."""
+    print('Generating Sublime Text project file')
+
+    project_data = {
+        "folders": [
+            {
+                "path": ".",
+                "file_exclude_patterns": ["*.blend*", "*.arm"]
+            },
+        ],
+    }
+
+    with open(subl_project_path, 'w', encoding='utf-8') as project_file:
+        json.dump(project_data, project_file, ensure_ascii=False, indent=4)
 
 def def_strings_to_array(strdefs):
     defs = strdefs.split('_')
@@ -620,7 +638,7 @@ def target_to_gapi(arm_project_target):
         return 'arm_gapi_mac'
     elif arm_project_target == 'macos-hl':
         return 'arm_gapi_mac'
-    elif arm_project_target == 'android-native-hl':
+    elif arm_project_target == 'android-hl':
         return 'arm_gapi_android'
     elif arm_project_target == 'ios-hl':
         return 'arm_gapi_ios'

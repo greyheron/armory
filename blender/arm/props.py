@@ -9,9 +9,10 @@ import arm.utils
 import arm.make
 import arm.props_renderpath as props_renderpath
 import arm.proxy
+import arm.nodes_logic
 
 # Armory version
-arm_version = '0.7'
+arm_version = '2019.12'
 arm_commit = '$Id$'
 
 def init_properties():
@@ -47,14 +48,6 @@ def init_properties():
                ('Enabled', 'Enabled', 'Enabled'),
                ('Auto', 'Auto', 'Auto')],
         name="Zui", default='Auto', description="Include UI library", update=assets.invalidate_compiler_cache)
-    bpy.types.World.arm_hscript = EnumProperty(
-        items=[('Disabled', 'Disabled', 'Disabled'),
-               ('Enabled', 'Enabled', 'Enabled')],
-        name="Hscript", default='Disabled', description="Include Hscript library", update=assets.invalidate_compiler_cache)
-    bpy.types.World.arm_formatlib = EnumProperty(
-        items=[('Disabled', 'Disabled', 'Disabled'),
-               ('Enabled', 'Enabled', 'Enabled')],
-        name="Format", default='Disabled', description="Include Format library", update=assets.invalidate_compiler_cache)
     bpy.types.World.arm_audio = EnumProperty(
         items=[('Disabled', 'Disabled', 'Disabled'),
                ('Enabled', 'Enabled', 'Enabled')],
@@ -87,6 +80,7 @@ def init_properties():
     bpy.types.World.arm_vsync = BoolProperty(name="VSync", description="Vertical Synchronization", default=True, update=assets.invalidate_compiler_cache)
     bpy.types.World.arm_dce = BoolProperty(name="DCE", description="Enable dead code elimination for publish builds", default=True, update=assets.invalidate_compiler_cache)
     bpy.types.World.arm_asset_compression = BoolProperty(name="Asset Compression", description="Enable scene data compression", default=False, update=assets.invalidate_compiler_cache)
+    bpy.types.World.arm_single_data_file = BoolProperty(name="Single Data File", description="Pack exported meshes and materials into single file", default=False, update=assets.invalidate_compiler_cache)
     bpy.types.World.arm_write_config = BoolProperty(name="Write Config", description="Allow this project to be configured at runtime via a JSON file", default=False, update=assets.invalidate_compiler_cache)
     bpy.types.World.arm_compiler_inline = BoolProperty(name="Compiler Inline", description="Favor speed over size", default=True, update=assets.invalidate_compiler_cache)
     bpy.types.World.arm_winmode = EnumProperty(
@@ -143,8 +137,6 @@ def init_properties():
     bpy.types.MetaBall.arm_cached = BoolProperty(name="Mesh Cached", description="No need to reexport metaball data", default=False)
     bpy.types.MetaBall.arm_aabb = FloatVectorProperty(name="AABB", size=3, default=[0,0,0])
     bpy.types.MetaBall.arm_dynamic_usage = BoolProperty(name="Dynamic Data Usage", description="Metaball data can change at runtime", default=False)
-    # For grease pencil
-    # bpy.types.GreasePencil.arm_cached = BoolProperty(name="GP Cached", description="No need to reexport grease pencil data", default=False)
     # For armature
     bpy.types.Armature.arm_cached = BoolProperty(name="Armature Cached", description="No need to reexport armature data", default=False)
     # For camera
@@ -306,47 +298,13 @@ def init_properties_on_load():
     wrd = bpy.data.worlds['Arm']
     # Outdated project
     if bpy.data.filepath != '' and (wrd.arm_version != arm_version or wrd.arm_commit != arm_commit): # Call on project load only
-        
-        # This allows for seamless migration from ealier versions of
-        # Armory that don't have `item.node_tree_prop` set
-        for ob in bpy.data.objects: # TODO: deprecated
-            for trait in ob.arm_traitlist:
-                if trait != None and \
-                   trait.type_prop == 'Logic Nodes' and \
-                   trait.node_tree_prop == None and \
-                   trait.name in bpy.data.node_groups:
-                    trait.node_tree_prop = bpy.data.node_groups[trait.name]
-        for scn in bpy.data.scenes: # TODO: deprecated
-            # Scene traits
-            for trait in scn.arm_traitlist:
-                if trait != None and \
-                   trait.type_prop == 'Logic Nodes' and \
-                   trait.node_tree_prop == None and \
-                   trait.name in bpy.data.node_groups:
-                    trait.node_tree_prop = bpy.data.node_groups[trait.name]
-            # Bake list items
-            for item in scn.arm_bakelist:
-                if item != None and \
-                   item.obj == None and \
-                   item.object_name in scn.collection.all_objects:
-                   item.obj = scn.collection.all_objects[item.object_name]
-        # Update StringProperty to PointerProperty
-        for node_group in bpy.data.node_groups: # TODO: deprecated
-            if node_group.bl_idname == 'ArmLogicTreeType':
-                for node in node_group.nodes:
-                    if hasattr(node, 'property0_get') and node.property0 != '':
-                        if node.bl_idname == 'LNMeshNode':
-                            node.property0_get = bpy.data.meshes[node.property0.strip()]
-                        elif node.bl_idname == 'LNSceneNode':
-                            node.property0_get = bpy.data.scenes[node.property0.strip()]
-                        node.property0 = ''
-                    for inp in node.inputs:
-                        if inp.bl_idname == 'ArmNodeSocketObject' and inp.default_value != '':
-                            inp.default_value_get = bpy.data.objects[inp.default_value]
-                            inp.default_value = ''
-                        elif inp.bl_idname == 'ArmNodeSocketAnimAction' and inp.default_value != '':
-                            inp.default_value_get = bpy.data.actions[inp.default_value]
-                            inp.default_value = ''
+        # This allows for seamless migration from ealier versions of Armory
+        for rp in wrd.arm_rplist: # TODO: deprecated
+            if rp.rp_gi != 'Off':
+                rp.rp_gi = 'Off'
+                rp.rp_voxelao = True
+        # Replace deprecated nodes
+        arm.nodes_logic.replaceAll()
 
         print('Project updated to sdk v' + arm_version + ' (' + arm_commit + ')')
         wrd.arm_version = arm_version

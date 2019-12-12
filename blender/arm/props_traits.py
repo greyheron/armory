@@ -10,6 +10,7 @@ from arm.props_traits_props import *
 import arm.utils
 import arm.write_data as write_data
 import arm.make as make
+import json
 
 def trigger_recompile(self, context):
     wrd = bpy.data.worlds['Arm']
@@ -245,24 +246,25 @@ class ArmEditScriptButton(bpy.types.Operator):
     bl_label = 'Edit Script'
 
     is_object: BoolProperty(name="", description="A name for this item", default=False)
- 
+
     def execute(self, context):
 
         arm.utils.check_default_props()
 
         if not os.path.exists(arm.utils.get_fp() + "/khafile.js"):
-            print('Generating Krom project for Kode Studio')
+            print('Generating Krom project for IDE build configuration')
             make.build('krom')
 
         if self.is_object:
             obj = bpy.context.object
         else:
             obj = bpy.context.scene
+
         item = obj.arm_traitlist[obj.arm_traitlist_index]
         pkg = arm.utils.safestr(bpy.data.worlds['Arm'].arm_project_package)
         # Replace the haxe package syntax with the os-dependent path syntax for opening
         hx_path = arm.utils.get_fp() + '/Sources/' + pkg + '/' + item.class_name_prop.replace('.', os.sep) + '.hx'
-        arm.utils.kode_studio(hx_path)
+        arm.utils.open_editor(hx_path)
         return{'FINISHED'}
 
 class ArmEditBundledScriptButton(bpy.types.Operator):
@@ -271,11 +273,11 @@ class ArmEditBundledScriptButton(bpy.types.Operator):
     bl_label = 'Edit Script'
 
     is_object: BoolProperty(name="", description="A name for this item", default=False)
- 
+
     def execute(self, context):
         if not arm.utils.check_saved(self):
             return {'CANCELLED'}
-        
+
         if self.is_object:
             obj = bpy.context.object
         else:
@@ -283,7 +285,7 @@ class ArmEditBundledScriptButton(bpy.types.Operator):
         sdk_path = arm.utils.get_sdk_path()
         project_path = arm.utils.get_fp()
         pkg = arm.utils.safestr(bpy.data.worlds['Arm'].arm_project_package)
-        item = obj.arm_traitlist[obj.arm_traitlist_index]  
+        item = obj.arm_traitlist[obj.arm_traitlist_index]
         source_hx_path = sdk_path + '/armory/Sources/armory/trait/' + item.class_name_prop + '.hx'
         target_hx_path = project_path + '/Sources/' + pkg + '/' + item.class_name_prop + '.hx'
 
@@ -303,7 +305,88 @@ class ArmEditBundledScriptButton(bpy.types.Operator):
 
         # Edit in Kode Studio
         bpy.ops.arm.edit_script('EXEC_DEFAULT', is_object=self.is_object)
+
+        return{'FINISHED'}
+
+class ArmoryGenerateNavmeshButton(bpy.types.Operator):
+    '''Generate navmesh from selected meshes'''
+    bl_idname = 'arm.generate_navmesh'
+    bl_label = 'Generate Navmesh'
+    def execute(self, context):
+        obj = context.active_object
+
+        if obj.type != 'MESH':
+            return{'CANCELLED'}
+
+        if not arm.utils.check_saved(self):
+            return {"CANCELLED"}
+
+        if not arm.utils.check_sdkpath(self):
+            return {"CANCELLED"}
+
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        armature = obj.find_armature()
+        apply_modifiers = not armature
+
+        obj_eval = obj.evaluated_get(depsgraph) if apply_modifiers else obj
+        exportMesh = obj_eval.to_mesh()
+        # TODO: build tilecache here
+        print("Started visualization generation")
+        # For visualization
+        nav_full_path = arm.utils.get_fp_build() + '/compiled/Assets/navigation'
+        if not os.path.exists(nav_full_path):
+            os.makedirs(nav_full_path)
         
+        nav_mesh_name = 'nav_' + obj_eval.data.name
+        mesh_path = nav_full_path + '/' + nav_mesh_name + '.obj'
+
+        with open(mesh_path, 'w') as f:
+            for v in exportMesh.vertices:
+                f.write("v %.4f " % (v.co[0] * obj_eval.scale.x))
+                f.write("%.4f " % (v.co[2] * obj_eval.scale.z))
+                f.write("%.4f\n" % (v.co[1] * obj_eval.scale.y)) # Flipped
+            for p in exportMesh.polygons:
+                f.write("f")
+                for i in reversed(p.vertices): # Flipped normals
+                    f.write(" %d" % (i + 1))
+                f.write("\n")
+
+        buildnavjs_path = arm.utils.get_sdk_path() + '/lib/haxerecast/buildnavjs'
+
+        # append config values
+        nav_config = {}
+        for t in obj.arm_traitlist:
+            # check if trait is navmesh here
+            if len(t.arm_traitpropslist) > 0 and t.class_name_prop == 'NavMesh':
+                for pt in t.arm_traitpropslist: # Append props
+                    prop = pt.name.replace(')', '').split('(')
+                    name = prop[0]
+                    value = float(pt.value)
+                    nav_config[name] = value
+        nav_config_json = json.dumps(nav_config)
+
+        args = [arm.utils.get_node_path(), buildnavjs_path, nav_mesh_name, nav_config_json]
+        proc = subprocess.Popen(args, cwd=nav_full_path)
+        proc.wait()
+
+        navmesh = bpy.ops.import_scene.obj(filepath=mesh_path)
+        navmesh = bpy.context.selected_objects[0]
+
+        navmesh.name = nav_mesh_name
+        navmesh.rotation_euler = (0,0,0)
+        navmesh.location = (obj.location.x,obj.location.y,obj.location.z)
+        navmesh.arm_export = False
+
+        bpy.context.view_layer.objects.active = navmesh
+        bpy.ops.object.editmode_toggle()
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.remove_doubles()
+        bpy.ops.object.editmode_toggle()
+
+        obj_eval.to_mesh_clear()
+
+        print("Finished visualization generation")
+
         return{'FINISHED'}
 
 class ArmEditCanvasButton(bpy.types.Operator):
@@ -312,7 +395,7 @@ class ArmEditCanvasButton(bpy.types.Operator):
     bl_label = 'Edit Canvas'
 
     is_object: BoolProperty(name="", description="A name for this item", default=False)
- 
+
     def execute(self, context):
         if self.is_object:
             obj = bpy.context.object
@@ -321,11 +404,10 @@ class ArmEditCanvasButton(bpy.types.Operator):
         project_path = arm.utils.get_fp()
         item = obj.arm_traitlist[obj.arm_traitlist_index]
         canvas_path = project_path + '/Bundled/canvas/' + item.canvas_name_prop + '.json'
-        
         sdk_path = arm.utils.get_sdk_path()
-        armory2d_path = sdk_path + '/lib/armory_tools/armory2d'
-        bin_ext = '_opengl' if arm.utils.get_os() == 'win' else ''
-        krom_location, krom_path = arm.utils.krom_paths(bin_ext=bin_ext)
+        ext = 'd3d11' if arm.utils.get_os() == 'win' else 'opengl'
+        armory2d_path = sdk_path + '/lib/armory_tools/armory2d/' + ext
+        krom_location, krom_path = arm.utils.krom_paths()
         os.chdir(krom_location)
         cpath = canvas_path.replace('\\', '/')
         uiscale = str(arm.utils.get_ui_scale())
@@ -336,10 +418,10 @@ class ArmNewScriptDialog(bpy.types.Operator):
     '''Create blank script'''
     bl_idname = "arm.new_script"
     bl_label = "New Script"
- 
-    is_object: BoolProperty(name="", description="A name for this item", default=False)
-    class_name: StringProperty(name="Name")
- 
+
+    is_object: BoolProperty(name="Object trait", description="Is this an object trait?", default=False)
+    class_name: StringProperty(name="Name", description="The class name")
+
     def execute(self, context):
         if self.is_object:
             obj = bpy.context.object
@@ -348,24 +430,27 @@ class ArmNewScriptDialog(bpy.types.Operator):
         self.class_name = self.class_name.replace(' ', '')
         write_data.write_traithx(self.class_name)
         arm.utils.fetch_script_names()
-        item = obj.arm_traitlist[obj.arm_traitlist_index] 
-        item.class_name_prop = self.class_name 
+        item = obj.arm_traitlist[obj.arm_traitlist_index]
+        item.class_name_prop = self.class_name
         return {'FINISHED'}
- 
+
     def invoke(self, context, event):
         if not arm.utils.check_saved(self):
             return {'CANCELLED'}
         self.class_name = 'MyTrait'
         return context.window_manager.invoke_props_dialog(self)
 
+    def draw(self, context):
+        self.layout.prop(self, "class_name")
+
 class ArmNewCanvasDialog(bpy.types.Operator):
     '''Create blank canvas'''
     bl_idname = "arm.new_canvas"
     bl_label = "New Canvas"
- 
-    is_object: BoolProperty(name="", description="A name for this item", default=False)
-    canvas_name: StringProperty(name="Name")
- 
+
+    is_object: BoolProperty(name="Object trait", description="Is this an object trait?", default=False)
+    canvas_name: StringProperty(name="Name", description="The canvas name")
+
     def execute(self, context):
         if self.is_object:
             obj = bpy.context.object
@@ -374,21 +459,24 @@ class ArmNewCanvasDialog(bpy.types.Operator):
         self.canvas_name = self.canvas_name.replace(' ', '')
         write_data.write_canvasjson(self.canvas_name)
         arm.utils.fetch_script_names()
-        item = obj.arm_traitlist[obj.arm_traitlist_index] 
-        item.canvas_name_prop = self.canvas_name 
+        item = obj.arm_traitlist[obj.arm_traitlist_index]
+        item.canvas_name_prop = self.canvas_name
         return {'FINISHED'}
- 
+
     def invoke(self, context, event):
         if not arm.utils.check_saved(self):
             return {'CANCELLED'}
         self.canvas_name = 'MyCanvas'
         return context.window_manager.invoke_props_dialog(self)
 
+    def draw(self, context):
+        self.layout.prop(self, "canvas_name")
+
 class ArmNewWasmButton(bpy.types.Operator):
     '''Create new WebAssembly module'''
     bl_idname = 'arm.new_wasm'
     bl_label = 'New Module'
- 
+
     def execute(self, context):
         webbrowser.open('https://webassembly.studio/')
         return{'FINISHED'}
@@ -397,7 +485,7 @@ class ArmRefreshScriptsButton(bpy.types.Operator):
     '''Fetch all script names'''
     bl_idname = 'arm.refresh_scripts'
     bl_label = 'Refresh'
- 
+
     def execute(self, context):
         arm.utils.fetch_bundled_script_names()
         arm.utils.fetch_bundled_trait_props()
@@ -410,7 +498,7 @@ class ArmRefreshCanvasListButton(bpy.types.Operator):
     '''Fetch all canvas names'''
     bl_idname = 'arm.refresh_canvas_list'
     bl_label = 'Refresh'
- 
+
     def execute(self, context):
         arm.utils.fetch_script_names()
         return{'FINISHED'}
@@ -420,7 +508,7 @@ class ARM_PT_TraitPanel(bpy.types.Panel):
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "object"
- 
+
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
@@ -433,7 +521,7 @@ class ARM_PT_SceneTraitPanel(bpy.types.Panel):
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "scene"
- 
+
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
@@ -445,10 +533,10 @@ def draw_traits(layout, obj, is_object):
     rows = 2
     if len(obj.arm_traitlist) > 1:
         rows = 4
-    
+
     row = layout.row()
     row.template_list("ARM_UL_TraitList", "The_List", obj, "arm_traitlist", obj, "arm_traitlist_index", rows=rows)
-    
+
     col = row.column(align=True)
     op = col.operator("arm_traitlist.new_item", icon='ADD', text="")
     op.is_object = is_object
@@ -480,7 +568,7 @@ def draw_traits(layout, obj, is_object):
                 if len(bpy.data.worlds['Arm'].arm_bundled_scripts_list) == 0:
                     arm.utils.fetch_bundled_script_names()
                 row.prop_search(item, "class_name_prop", bpy.data.worlds['Arm'], "arm_bundled_scripts_list", text="Class")
-            
+
             # Props
             if len(item.arm_traitpropslist) > 0:
                 propsrow = layout.row()
@@ -488,7 +576,7 @@ def draw_traits(layout, obj, is_object):
                 if len(item.arm_traitpropslist) > 2:
                     propsrows = 4
                 row = layout.row()
-                row.template_list("ARM_UL_PropList", "The_List", item, "arm_traitpropslist", item, "arm_traitpropslist_index", rows=propsrows) 
+                row.template_list("ARM_UL_PropList", "The_List", item, "arm_traitpropslist", item, "arm_traitpropslist_index", rows=propsrows)
 
             if item.type_prop == 'Haxe Script':
                 row = layout.row(align=True)
@@ -503,14 +591,19 @@ def draw_traits(layout, obj, is_object):
                 op.is_object = is_object
                 op = row.operator("arm.refresh_scripts")
             else: # Bundled
+                if item.class_name_prop == 'NavMesh':
+                    row = layout.row(align=True)
+                    row.alignment = 'EXPAND'
+                    op = layout.operator("arm.generate_navmesh")
                 row = layout.row(align=True)
                 row.alignment = 'EXPAND'
                 column = row.column(align=True)
                 column.alignment = 'EXPAND'
-                op = column.operator("arm.edit_bundled_script", icon="FILE_SCRIPT")
-                op.is_object = is_object
+                if not item.class_name_prop == 'NavMesh':
+                    op = column.operator("arm.edit_bundled_script", icon="FILE_SCRIPT")
+                    op.is_object = is_object
                 op = row.operator("arm.refresh_scripts")
-        
+
         elif item.type_prop == 'WebAssembly':
             item.name = item.webassembly_prop
             row = layout.row()
@@ -531,7 +624,7 @@ def draw_traits(layout, obj, is_object):
             item.name = item.canvas_name_prop
             row = layout.row()
             row.prop_search(item, "canvas_name_prop", bpy.data.worlds['Arm'], "arm_canvas_list", text="Canvas")
-            
+
             row = layout.row(align=True)
             row.alignment = 'EXPAND'
             column = row.column(align=True)
@@ -558,6 +651,7 @@ def register():
     bpy.utils.register_class(ArmTraitListMoveItem)
     bpy.utils.register_class(ArmEditScriptButton)
     bpy.utils.register_class(ArmEditBundledScriptButton)
+    bpy.utils.register_class(ArmoryGenerateNavmeshButton)
     bpy.utils.register_class(ArmEditCanvasButton)
     bpy.utils.register_class(ArmNewScriptDialog)
     bpy.utils.register_class(ArmNewCanvasDialog)
@@ -585,6 +679,7 @@ def unregister():
     bpy.utils.unregister_class(ArmTraitListMoveItem)
     bpy.utils.unregister_class(ArmEditScriptButton)
     bpy.utils.unregister_class(ArmEditBundledScriptButton)
+    bpy.utils.unregister_class(ArmoryGenerateNavmeshButton)
     bpy.utils.unregister_class(ArmEditCanvasButton)
     bpy.utils.unregister_class(ArmNewScriptDialog)
     bpy.utils.unregister_class(ArmNewCanvasDialog)

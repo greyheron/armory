@@ -1,6 +1,5 @@
 package armory.trait.internal;
 
-import iron.math.Math;
 import iron.Trait;
 #if arm_debug
 import kha.Scheduler;
@@ -52,7 +51,7 @@ class DebugConsole extends Trait {
 	static var lrow = [1/2, 1/2];
 	static var row4 = [1/4, 1/4, 1/4, 1/4];
 
-	public static var f = 1.0;
+	public static var debugFloat = 1.0;
 	public static var watchNodes:Array<armory.logicnode.LogicNode> = [];
 
 	public function new(scaleFactor = 1.0) {
@@ -61,9 +60,7 @@ class DebugConsole extends Trait {
 		this.scaleFactor = scaleFactor;
 
 		iron.data.Data.getFont('font_default.ttf', function(font:kha.Font) {
-			var theme = Reflect.copy(zui.Themes.dark);
-			theme.WINDOW_BG_COL = 0xee111111;
-			ui = new Zui({scaleFactor: scaleFactor, font: font, theme: theme});
+			ui = new Zui({scaleFactor: scaleFactor, font: font});
 			notifyOnRender2D(render2D);
 			notifyOnUpdate(update);
 			if (haxeTrace == null) {
@@ -73,8 +70,8 @@ class DebugConsole extends Trait {
 			// Toggle console
 			kha.input.Keyboard.get().notify(null, null, function(char: String) {
 				if (char == "~") visible = !visible;
-				else if (char == "[") f -= 0.1;
-				else if (char == "]") f += 0.1;
+				else if (char == "[") { debugFloat -= 0.1; trace(debugFloat); }
+				else if (char == "]") { debugFloat += 0.1; trace(debugFloat); }
 			});
 		});
 	}
@@ -112,7 +109,7 @@ class DebugConsole extends Trait {
 
 		graph.g2.color = 0xff000000;
 		graph.g2.fillRect(280 - 3, 33 - 17, 3, 1);
-		
+
 		graph.g2.end();
 	}
 
@@ -136,7 +133,7 @@ class DebugConsole extends Trait {
 		// var bindG = ui.windowDirty(hwin, wx, wy, ww, wh) || hwin.redraws > 0;
 		var bindG = true;
 		if (bindG) g.end();
-		
+
 		ui.begin(g);
 		if (ui.window(hwin, wx, wy, ww, wh, true)) {
 
@@ -146,7 +143,7 @@ class DebugConsole extends Trait {
 
 				if (ui.panel(Id.handle({selected: true}), "Outliner")) {
 					ui.indent();
-					
+
 					var i = 0;
 					function drawList(h:zui.Zui.Handle, o:iron.object.Object) {
 						if (o.name.charAt(0) == '.') return; // Hidden
@@ -158,7 +155,7 @@ class DebugConsole extends Trait {
 						}
 						if (o.children.length > 0) {
 							ui.row([1/13, 12/13]);
-							b = ui.panel(h.nest(i, {selected: true}), "", 0, true);
+							b = ui.panel(h.nest(i, {selected: true}), "", true);
 							ui.text(o.name);
 						}
 						else {
@@ -184,12 +181,12 @@ class DebugConsole extends Trait {
 
 					ui.unindent();
 				}
-				
+
 				if (selectedObject == null) selectedType = "";
 
 				if (ui.panel(Id.handle({selected: true}), 'Properties $selectedType')) {
 					ui.indent();
-					
+
 					if (selectedObject != null) {
 
 						var h = Id.handle();
@@ -207,36 +204,36 @@ class DebugConsole extends Trait {
 						ui.text("Location");
 
 						h = Id.handle();
-						h.text = Math.roundfp(loc.x) + "";
+						h.text = roundfp(loc.x) + "";
 						f = Std.parseFloat(ui.textInput(h, "X"));
 						if (ui.changed) loc.x = f;
 
 						h = Id.handle();
-						h.text = Math.roundfp(loc.y) + "";
+						h.text = roundfp(loc.y) + "";
 						f = Std.parseFloat(ui.textInput(h, "Y"));
 						if (ui.changed) loc.y = f;
 
 						h = Id.handle();
-						h.text = Math.roundfp(loc.z) + "";
+						h.text = roundfp(loc.z) + "";
 						f = Std.parseFloat(ui.textInput(h, "Z"));
 						if (ui.changed) loc.z = f;
 
 						ui.row(row4);
 						ui.text("Rotation");
-						
+
 						h = Id.handle();
-						h.text = Math.roundfp(rot.x) + "";
+						h.text = roundfp(rot.x) + "";
 						f = Std.parseFloat(ui.textInput(h, "X"));
 						var changed = false;
 						if (ui.changed) { changed = true; rot.x = f; }
 
 						h = Id.handle();
-						h.text = Math.roundfp(rot.y) + "";
+						h.text = roundfp(rot.y) + "";
 						f = Std.parseFloat(ui.textInput(h, "Y"));
 						if (ui.changed) { changed = true; rot.y = f; }
 
 						h = Id.handle();
-						h.text = Math.roundfp(rot.z) + "";
+						h.text = roundfp(rot.z) + "";
 						f = Std.parseFloat(ui.textInput(h, "Z"));
 						if (ui.changed) { changed = true; rot.z = f; }
 
@@ -252,19 +249,19 @@ class DebugConsole extends Trait {
 
 						ui.row(row4);
 						ui.text("Scale");
-						
+
 						h = Id.handle();
-						h.text = Math.roundfp(scale.x) + "";
+						h.text = roundfp(scale.x) + "";
 						f = Std.parseFloat(ui.textInput(h, "X"));
 						if (ui.changed) scale.x = f;
 
 						h = Id.handle();
-						h.text = Math.roundfp(scale.y) + "";
+						h.text = roundfp(scale.y) + "";
 						f = Std.parseFloat(ui.textInput(h, "Y"));
 						if (ui.changed) scale.y = f;
 
 						h = Id.handle();
-						h.text = Math.roundfp(scale.z) + "";
+						h.text = roundfp(scale.z) + "";
 						f = Std.parseFloat(ui.textInput(h, "Z"));
 						if (ui.changed) scale.z = f;
 
@@ -272,17 +269,17 @@ class DebugConsole extends Trait {
 						ui.text("Dimensions");
 
 						h = Id.handle();
-						h.text = Math.roundfp(dim.x) + "";
+						h.text = roundfp(dim.x) + "";
 						f = Std.parseFloat(ui.textInput(h, "X"));
 						if (ui.changed) dim.x = f;
 
 						h = Id.handle();
-						h.text = Math.roundfp(dim.y) + "";
+						h.text = roundfp(dim.y) + "";
 						f = Std.parseFloat(ui.textInput(h, "Y"));
 						if (ui.changed) dim.y = f;
 
 						h = Id.handle();
-						h.text = Math.roundfp(dim.z) + "";
+						h.text = roundfp(dim.z) + "";
 						f = Std.parseFloat(ui.textInput(h, "Z"));
 						if (ui.changed) dim.z = f;
 
@@ -316,7 +313,7 @@ class DebugConsole extends Trait {
 						}
 						else {
 							selectedType = "(Object)";
-							
+
 						}
 					}
 
@@ -335,7 +332,7 @@ class DebugConsole extends Trait {
 					ui.row(lrow);
 					ui.text('Frame');
 					ui.text('$avg ms / $fpsAvg fps', Align.Right);
-					
+
 					ui.row(lrow);
 					ui.text('Render-path');
 					ui.text(Math.round(renderPathTimeAvg * 10000) / 10 + " ms", Align.Right);
@@ -388,7 +385,7 @@ class DebugConsole extends Trait {
 					ui.row(lrow);
 					ui.text('Culled'); // Assumes shadow context for all meshes
 					ui.text(iron.RenderPath.culled + ' / ' + numMeshes * 2, Align.Right);
-					
+
 					#if arm_stream
 					ui.row(lrow);
 					var total = iron.Scene.active.sceneStream.sceneTotal();
@@ -494,12 +491,12 @@ class DebugConsole extends Trait {
 				if (benchFrames > 10) benchTime += t;
 				if (benchFrames == 20) trace(Std.int((benchTime / 10) * 1000000) / 1000); // ms
 			}
-			
+
 			renderPathTimeAvg = renderPathTime / frames;
 			updateTimeAvg = updateTime / frames;
 			animTimeAvg = animTime / frames;
 			physTimeAvg = physTime / frames;
-			
+
 			totalTime = 0;
 			renderPathTime = 0;
 			updateTime = 0;
@@ -518,12 +515,17 @@ class DebugConsole extends Trait {
 	}
 
 	function update() {
-		armory.trait.WalkNavigation.enabled = !(ui.isScrolling || (ui.currentWindow != null && ui.currentWindow.dragging));
+		armory.trait.WalkNavigation.enabled = !(ui.isScrolling || ui.dragHandle != null);
 		updateTime += iron.App.updateTime;
 		animTime += iron.object.Animation.animationTime;
 	#if arm_physics
 		physTime += armory.trait.physics.PhysicsWorld.physTime;
 	#end
+	}
+
+	static function roundfp(f:Float, precision = 2):Float {
+		f *= Math.pow(10, precision);
+		return Math.round(f) / Math.pow(10, precision);
 	}
 #end
 }
